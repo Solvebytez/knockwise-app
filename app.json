@@ -9,7 +9,10 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "config": {
+        "googleMapsApiKey": "AIzaSyCe1aICpk2SmN3ArHwp-79FnsOk38k072M"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -19,7 +22,13 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyCe1aICpk2SmN3ArHwp-79FnsOk38k072M"
+        }
+      },
+      "package": "com.sahin05.knockwiseapp"
     },
     "web": {
       "output": "static",
@@ -38,11 +47,25 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+      [
+        "react-native-maps",
+        {
+          "googleMapsApiKey": "AIzaSyCe1aICpk2SmN3ArHwp-79FnsOk38k072M"
+        }
+      ],
+      "./app.plugin.js"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "expoUrl": "https://api.myknockpro.com/api",
+      "router": {},
+      "eas": {
+        "projectId": "5ab6ed59-8640-42a9-89ea-7702d8bac225"
+      }
     }
   }
 }

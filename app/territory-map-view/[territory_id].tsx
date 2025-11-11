@@ -1,0 +1,4289 @@
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useMemo,
+  useCallback,
+} from "react";
+import {
+  View,
+  StyleSheet,
+  ActivityIndicator,
+  StatusBar,
+  TouchableOpacity,
+  Dimensions,
+  TextInput,
+  Modal,
+  Pressable,
+  ScrollView,
+  Linking,
+  Alert,
+} from "react-native";
+import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import MapView, {
+  Marker,
+  Polygon,
+  Region,
+  PROVIDER_GOOGLE,
+} from "react-native-maps";
+import { apiInstance } from "@/lib/apiInstance";
+import {
+  COLORS,
+  SPACING,
+  PADDING,
+  responsiveSpacing,
+  responsiveScale,
+} from "@/constants";
+import { Text, Body2, AppHeader } from "@/components/ui";
+import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
+import * as Location from "expo-location";
+import DateTimePickerModal from "react-native-modal-datetime-picker";
+import AddPropertyModal, {
+  AddPropertyModalRef,
+} from "@/components/AddPropertyModal";
+
+interface Territory {
+  _id: string;
+  name: string;
+  description?: string;
+  boundary: any;
+  totalResidents: number;
+  activeResidents: number;
+  status: string;
+}
+
+interface Property {
+  _id: string;
+  address: string;
+  houseNumber: number;
+  coordinates: [number, number];
+  status:
+    | "not-visited"
+    | "interested"
+    | "visited"
+    | "callback"
+    | "appointment"
+    | "follow-up"
+    | "not-interested";
+  lastVisited?: string;
+  notes?: string;
+  dataSource?: "AUTO" | "MANUAL";
+}
+
+export default function TerritoryMapViewScreen() {
+  const params = useLocalSearchParams();
+  const router = useRouter();
+  const territoryId = params.territory_id as string;
+
+  console.log("🗺️ TerritoryMapViewScreen: Component mounted", {
+    territoryId,
+    timestamp: new Date().toISOString(),
+  });
+
+  const [territory, setTerritory] = useState<Territory | null>(null);
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [filteredProperties, setFilteredProperties] = useState<Property[]>([]);
+  const [selectedProperty, setSelectedProperty] = useState<Property | null>(
+    null
+  );
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [highlightedPropertyId, setHighlightedPropertyId] = useState<
+    string | null
+  >(null);
+
+  // Edit property modal states (declared early for use in queries)
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editPropertyId, setEditPropertyId] = useState<string | null>(null);
+
+  // Add property modal ref
+  const addPropertyModalRef = useRef<AddPropertyModalRef>(null);
+
+  // Query client for cache management
+  const queryClient = useQueryClient();
+
+  // Property details query for detail modal (with caching)
+  const { data: detailedProperty, isLoading: isLoadingPropertyDetails } =
+    useQuery({
+      queryKey: ["propertyDetails", selectedProperty?._id],
+      queryFn: async () => {
+        if (!selectedProperty?._id) return null;
+        console.log(
+          "📡 Fetching property details (cached if available):",
+          selectedProperty._id
+        );
+        const response = await apiInstance.get(
+          `/residents/${selectedProperty._id}`
+        );
+        console.log("✅ Property details fetched:", response.data.data);
+        return response.data.data;
+      },
+      enabled: !!selectedProperty?._id && isDetailModalOpen,
+      staleTime: 5 * 60 * 1000, // 5 minutes - data is fresh for 5 min
+      gcTime: 10 * 60 * 1000, // 10 minutes - cache kept for 10 min
+    });
+
+  // Property details query for edit modal (with caching)
+  const { data: editPropertyDetails, isLoading: isLoadingEditPropertyDetails } =
+    useQuery({
+      queryKey: ["propertyDetails", editPropertyId],
+      queryFn: async () => {
+        if (!editPropertyId) return null;
+        console.log(
+          "📡 Fetching property details for edit (cached if available):",
+          editPropertyId
+        );
+        const response = await apiInstance.get(`/residents/${editPropertyId}`);
+        console.log("✅ Edit property details fetched:", response.data.data);
+        return response.data.data;
+      },
+      enabled: !!editPropertyId && isEditModalOpen,
+      staleTime: 5 * 60 * 1000, // 5 minutes - data is fresh for 5 min
+      gcTime: 10 * 60 * 1000, // 10 minutes - cache kept for 10 min
+    });
+  const mapRef = useRef<MapView>(null);
+  const bottomSheetRef = useRef<BottomSheet>(null);
+  const { height: screenHeight } = Dimensions.get("window");
+  const [showMap, setShowMap] = useState(false);
+
+  // Filter states
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("All Status");
+  const [dataSourceFilter, setDataSourceFilter] =
+    useState<string>("All Sources");
+  const [sortBy, setSortBy] = useState<string>("Sequential");
+
+  // Dropdown modal states
+  const [statusDropdownVisible, setStatusDropdownVisible] = useState(false);
+  const [dataSourceDropdownVisible, setDataSourceDropdownVisible] =
+    useState(false);
+  const [editStatusDropdownVisible, setEditStatusDropdownVisible] =
+    useState(false);
+
+  // Edit property modal states (additional)
+  const [isUpdatingResident, setIsUpdatingResident] = useState(false);
+  const [isEditValidating, setIsEditValidating] = useState(false);
+  const [editValidationErrors, setEditValidationErrors] = useState<string[]>(
+    []
+  );
+  const [isEditGettingLocation, setIsEditGettingLocation] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
+  // Address autocomplete states
+  const [addressSuggestions, setAddressSuggestions] = useState<any[]>([]);
+  const [showAddressSuggestions, setShowAddressSuggestions] = useState(false);
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+  const addressInputRef = useRef<TextInput>(null);
+
+  const [editFormData, setEditFormData] = useState({
+    address: "",
+    houseNumber: "",
+    longitude: "",
+    latitude: "",
+    status: "not-visited" as Property["status"],
+    lastVisited: "",
+    notes: "",
+    phone: "",
+    email: "",
+    ownerName: "",
+    ownerPhone: "",
+    ownerEmail: "",
+    ownerMailingAddress: "",
+  });
+
+  // Add property modal state
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+
+  // Statistics state (matching web client)
+  const [stats, setStats] = useState({
+    totalHomes: 0,
+    visited: 0,
+    remaining: 0,
+  });
+
+  // Bottom sheet snap points - leave gap from top when expanded
+  const snapPoints = useMemo(() => {
+    const gapFromTop = 100; // Gap from top in pixels
+    const expandedHeight = screenHeight - gapFromTop;
+    // Collapsed height: just enough to show drag handle and header (approximately 100px)
+    return [100, expandedHeight];
+  }, [screenHeight]);
+
+  // Status colors matching web client
+  const statusColors = {
+    "not-visited": "#EF4444", // red
+    interested: "#F59E0B", // amber
+    visited: "#10B981", // emerald
+    callback: "#8B5CF6", // violet
+    appointment: "#3B82F6", // blue
+    "follow-up": "#EC4899", // pink
+    "not-interested": "#6B7280", // gray
+  };
+
+  // Fetch territory map view data (same API endpoint as web client)
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["territoryMapView", territoryId],
+    queryFn: async () => {
+      console.log("📡 Fetching territory map view data...", {
+        territoryId,
+        endpoint: `/zones/map-view/${territoryId}`,
+      });
+      try {
+        // Same endpoint as web client: /zones/map-view/${territoryId}
+        const response = await apiInstance.get(
+          `/zones/map-view/${territoryId}`
+        );
+        console.log("✅ Territory map view data fetched successfully", {
+          success: response.data?.success,
+          hasZone: !!response.data?.data?.zone,
+          propertiesCount: response.data?.data?.properties?.length || 0,
+        });
+        return response.data;
+      } catch (err) {
+        console.error("❌ Error fetching territory map view:", err);
+        throw err;
+      }
+    },
+    enabled: !!territoryId,
+    refetchOnWindowFocus: false,
+  });
+
+  console.log("📊 Query state:", {
+    isLoading,
+    hasError: !!error,
+    hasData: !!data,
+    errorMessage: error?.message,
+  });
+
+  useEffect(() => {
+    console.log("🔄 useEffect [data]: Processing territory data", {
+      hasData: !!data,
+      success: data?.success,
+      hasZone: !!data?.data?.zone,
+      timestamp: new Date().toISOString(),
+    });
+
+    if (data?.success && data?.data) {
+      const {
+        zone,
+        properties: zoneProperties,
+        statusSummary,
+        statistics,
+      } = data.data;
+
+      console.log("📍 Setting territory and properties state", {
+        zoneId: zone?._id,
+        zoneName: zone?.name,
+        propertiesCount: zoneProperties?.length || 0,
+        hasBoundary: !!zone?.boundary,
+        boundaryCoordinates: zone?.boundary?.coordinates?.[0]?.length || 0,
+      });
+
+      // Set territory data (same as web client)
+      setTerritory(zone);
+
+      // Set properties data (same as web client)
+      setProperties(zoneProperties || []);
+      setFilteredProperties(zoneProperties || []);
+
+      // Note: statusSummary and statistics will be used in Phase 7
+      console.log("✅ Territory data loaded:", {
+        zone,
+        propertiesCount: zoneProperties?.length || 0,
+        statusSummary,
+        statistics,
+      });
+    } else {
+      console.warn("⚠️ Data not ready or invalid", {
+        hasData: !!data,
+        success: data?.success,
+        hasDataField: !!data?.data,
+      });
+    }
+  }, [data]);
+
+  // Filter and sort properties
+  useEffect(() => {
+    let filtered = [...properties];
+
+    // Apply search filter
+    if (searchTerm.trim()) {
+      const searchLower = searchTerm.toLowerCase();
+      filtered = filtered.filter(
+        (property) =>
+          property.address.toLowerCase().includes(searchLower) ||
+          property.houseNumber.toString().includes(searchTerm)
+      );
+    }
+
+    // Apply status filter
+    if (statusFilter && statusFilter !== "All Status") {
+      filtered = filtered.filter(
+        (property) => property.status === statusFilter
+      );
+    }
+
+    // Apply data source filter
+    if (dataSourceFilter && dataSourceFilter !== "All Sources") {
+      filtered = filtered.filter(
+        (property) => property.dataSource === dataSourceFilter
+      );
+    }
+
+    // Apply sorting
+    if (sortBy === "Sequential") {
+      filtered = filtered.sort((a, b) => a.houseNumber - b.houseNumber);
+    } else if (sortBy === "Odd") {
+      filtered = filtered
+        .filter((property) => property.houseNumber % 2 === 1)
+        .sort((a, b) => a.houseNumber - b.houseNumber);
+    } else if (sortBy === "Even") {
+      filtered = filtered
+        .filter((property) => property.houseNumber % 2 === 0)
+        .sort((a, b) => a.houseNumber - b.houseNumber);
+    }
+
+    setFilteredProperties(filtered);
+  }, [properties, searchTerm, statusFilter, dataSourceFilter, sortBy]);
+
+  // Update statistics whenever properties change (matching web client)
+  useEffect(() => {
+    let visitedCount = 0;
+
+    properties.forEach((property) => {
+      // Count visited properties (any status except not-visited and not-interested)
+      if (
+        property.status === "visited" ||
+        property.status === "interested" ||
+        property.status === "callback" ||
+        property.status === "appointment" ||
+        property.status === "follow-up"
+      ) {
+        visitedCount++;
+      }
+    });
+
+    setStats({
+      totalHomes: properties.length,
+      visited: visitedCount,
+      remaining: properties.length - visitedCount,
+    });
+  }, [properties]);
+
+  const handleBack = () => {
+    router.back();
+  };
+
+  // Convert boundary coordinates from GeoJSON format [lng, lat] to map format { latitude, longitude }
+  const boundaryCoordinates = useMemo(() => {
+    if (!territory?.boundary?.coordinates?.[0]) return [];
+
+    return territory.boundary.coordinates[0].map(
+      ([lng, lat]: [number, number]) => ({
+        latitude: lat,
+        longitude: lng,
+      })
+    );
+  }, [territory?.boundary]);
+
+  // Calculate initial region from boundary coordinates or properties
+  const initialRegion = useMemo<Region | undefined>(() => {
+    console.log("🗺️ Calculating initialRegion", {
+      boundaryCoordinatesCount: boundaryCoordinates.length,
+      propertiesCount: properties.length,
+    });
+
+    // If we have boundary coordinates, use them
+    if (boundaryCoordinates.length > 0) {
+      const lats = boundaryCoordinates.map(
+        (coord: { latitude: number; longitude: number }) => coord.latitude
+      );
+      const lngs = boundaryCoordinates.map(
+        (coord: { latitude: number; longitude: number }) => coord.longitude
+      );
+
+      const minLat = Math.min(...lats);
+      const maxLat = Math.max(...lats);
+      const minLng = Math.min(...lngs);
+      const maxLng = Math.max(...lngs);
+
+      const centerLat = (minLat + maxLat) / 2;
+      const centerLng = (minLng + maxLng) / 2;
+
+      const latDelta = (maxLat - minLat) * 1.3; // Add 30% padding
+      const lngDelta = (maxLng - minLng) * 1.3;
+
+      const region = {
+        latitude: centerLat,
+        longitude: centerLng,
+        latitudeDelta: Math.max(latDelta, 0.01), // Minimum delta
+        longitudeDelta: Math.max(lngDelta, 0.01),
+      };
+      console.log("📍 InitialRegion calculated from boundary:", region);
+      return region;
+    }
+
+    // If we have properties but no boundary, calculate from properties
+    if (properties.length > 0) {
+      const lats = properties.map((p) => p.coordinates[1]);
+      const lngs = properties.map((p) => p.coordinates[0]);
+
+      const minLat = Math.min(...lats);
+      const maxLat = Math.max(...lats);
+      const minLng = Math.min(...lngs);
+      const maxLng = Math.max(...lngs);
+
+      const centerLat = (minLat + maxLat) / 2;
+      const centerLng = (minLng + maxLng) / 2;
+
+      const latDelta = (maxLat - minLat) * 1.3 || 0.05;
+      const lngDelta = (maxLng - minLng) * 1.3 || 0.05;
+
+      const region = {
+        latitude: centerLat,
+        longitude: centerLng,
+        latitudeDelta: Math.max(latDelta, 0.01),
+        longitudeDelta: Math.max(lngDelta, 0.01),
+      };
+      console.log("📍 InitialRegion calculated from properties:", region);
+      return region;
+    }
+
+    // Fallback: Default region (can be adjusted based on your app's typical location)
+    const fallbackRegion = {
+      latitude: 37.7749, // San Francisco default (adjust as needed)
+      longitude: -122.4194,
+      latitudeDelta: 0.05,
+      longitudeDelta: 0.05,
+    };
+    console.log("📍 InitialRegion using fallback (default):", fallbackRegion);
+    return fallbackRegion;
+  }, [boundaryCoordinates, properties]);
+
+  // Delay map rendering to ensure layout is stable and Google Maps SDK is ready
+  // Only render map when we have territory data (not just fallback region)
+  useEffect(() => {
+    console.log(
+      "⏱️ useEffect [initialRegion, territory]: Checking map readiness",
+      {
+        hasInitialRegion: !!initialRegion,
+        hasTerritory: !!territory,
+        initialRegion,
+        showMap,
+        timestamp: new Date().toISOString(),
+      }
+    );
+
+    // Only start delay if:
+    // 1. initialRegion exists
+    // 2. Territory data is loaded (not just fallback region)
+    // 3. showMap is not already true
+    // This prevents rendering MapView with fallback region and then re-rendering with real region
+    const isUsingFallbackRegion =
+      initialRegion?.latitude === 37.7749 &&
+      initialRegion?.longitude === -122.4194;
+    const shouldRenderMap =
+      initialRegion && territory && !isUsingFallbackRegion && !showMap;
+
+    if (shouldRenderMap) {
+      console.log(
+        "⏳ Starting 500ms delay before rendering MapView with real region..."
+      );
+      const timer = setTimeout(() => {
+        console.log("✅ Delay complete, setting showMap to true");
+        setShowMap(true);
+      }, 500);
+      return () => {
+        console.log("🧹 Cleaning up map delay timer");
+        clearTimeout(timer);
+      };
+    } else if (showMap) {
+      console.log("✅ showMap already true, skipping delay");
+    } else if (!territory) {
+      console.log("⏸️ Waiting for territory data...");
+    } else if (isUsingFallbackRegion) {
+      console.log(
+        "⏸️ Using fallback region, waiting for real territory data..."
+      );
+    } else {
+      console.log("⏸️ initialRegion not ready yet, waiting...");
+    }
+  }, [initialRegion, territory, showMap]);
+
+  // Fit map to boundary when territory data loads (moved to onMapReady)
+  // This ensures the map is fully initialized before fitting
+
+  // Handle property marker press
+  const handlePropertyPress = (property: Property) => {
+    setSelectedProperty(property);
+    setHighlightedPropertyId(property._id);
+
+    // Open modal immediately - React Query will fetch (or use cache)
+    setIsDetailModalOpen(true);
+
+    // Center map on selected property
+    if (mapRef.current) {
+      mapRef.current.animateToRegion(
+        {
+          latitude: property.coordinates[1],
+          longitude: property.coordinates[0],
+          latitudeDelta: 0.01,
+          longitudeDelta: 0.01,
+        },
+        500
+      );
+    }
+
+    // Clear highlight after 2 seconds
+    setTimeout(() => {
+      setHighlightedPropertyId(null);
+    }, 2000);
+  };
+
+  // Handle property click from list
+  const handlePropertyClick = (property: Property) => {
+    setSelectedProperty(property);
+    setHighlightedPropertyId(property._id);
+
+    // Open modal immediately - React Query will fetch (or use cache)
+    setIsDetailModalOpen(true);
+
+    // Center map on selected property
+    if (mapRef.current) {
+      mapRef.current.animateToRegion(
+        {
+          latitude: property.coordinates[1],
+          longitude: property.coordinates[0],
+          latitudeDelta: 0.01,
+          longitudeDelta: 0.01,
+        },
+        500
+      );
+    }
+
+    // Clear highlight after 2 seconds
+    setTimeout(() => {
+      setHighlightedPropertyId(null);
+    }, 2000);
+  };
+
+  // Handle close detail modal
+  const handleCloseDetailModal = () => {
+    setIsDetailModalOpen(false);
+    // Don't clear selectedProperty - keep it for cache reuse
+  };
+
+  // Handle phone number press
+  const handlePhonePress = (phone: string) => {
+    Linking.openURL(`tel:${phone}`);
+  };
+
+  // Handle edit property (matching web client - open modal immediately, fetch data in background with caching)
+  const handleEditProperty = (property: Property) => {
+    setSelectedProperty(property);
+    setEditPropertyId(property._id); // Set property ID to trigger React Query
+    setIsEditModalOpen(true);
+
+    // Initialize form data with basic property values (from property list)
+    setEditFormData({
+      address: property.address,
+      houseNumber: property.houseNumber?.toString() || "",
+      longitude: property.coordinates[0]?.toString() || "",
+      latitude: property.coordinates[1]?.toString() || "",
+      status: property.status,
+      lastVisited: property.lastVisited
+        ? new Date(property.lastVisited).toISOString().split("T")[0]
+        : "",
+      notes: property.notes || "",
+      phone: "",
+      email: "",
+      ownerName: "",
+      ownerPhone: "",
+      ownerEmail: "",
+      ownerMailingAddress: "",
+    });
+
+    // Close detail modal if open
+    setIsDetailModalOpen(false);
+  };
+
+  // Update form data when editPropertyDetails loads (from React Query cache or fetch)
+  useEffect(() => {
+    if (editPropertyDetails && selectedProperty) {
+      console.log("📝 Updating form data with cached/fetched property details");
+      setEditFormData((prev) => ({
+        ...prev,
+        lastVisited: (() => {
+          const detailedDate = editPropertyDetails?.resident?.lastVisited
+            ? new Date(editPropertyDetails.resident.lastVisited)
+                .toISOString()
+                .split("T")[0]
+            : "";
+          const propertyDate = selectedProperty.lastVisited
+            ? new Date(selectedProperty.lastVisited).toISOString().split("T")[0]
+            : "";
+          return detailedDate || propertyDate || prev.lastVisited;
+        })(),
+        notes:
+          editPropertyDetails?.resident?.notes ||
+          selectedProperty.notes ||
+          prev.notes,
+        phone: editPropertyDetails?.resident?.phone || prev.phone,
+        email: editPropertyDetails?.resident?.email || prev.email,
+        ownerName:
+          editPropertyDetails?.propertyData?.ownerName || prev.ownerName,
+        ownerPhone:
+          editPropertyDetails?.propertyData?.ownerPhone || prev.ownerPhone,
+        ownerEmail:
+          editPropertyDetails?.propertyData?.ownerEmail || prev.ownerEmail,
+        ownerMailingAddress:
+          editPropertyDetails?.propertyData?.ownerMailingAddress ||
+          prev.ownerMailingAddress,
+      }));
+    }
+  }, [editPropertyDetails, selectedProperty]);
+
+  // Handle form change (matching web client)
+  const handleFormChange = (field: string, value: string) => {
+    if (isUpdatingResident) return;
+    setEditFormData((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+    // Validate form after change
+    setTimeout(() => validateEditForm(), 500);
+  };
+
+  // Validate edit form (matching web client)
+  const validateEditForm = async (): Promise<boolean> => {
+    setIsEditValidating(true);
+    setEditValidationErrors([]);
+
+    const errors: string[] = [];
+
+    try {
+      // Check required fields - only house number is mandatory
+      if (!editFormData.houseNumber) {
+        errors.push("House number is required");
+      }
+
+      // Validate coordinates format (only if provided)
+      if (editFormData.latitude && editFormData.longitude) {
+        const lat = parseFloat(editFormData.latitude);
+        const lng = parseFloat(editFormData.longitude);
+
+        if (isNaN(lat) || isNaN(lng)) {
+          errors.push("Invalid coordinates format");
+        } else if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+          errors.push("Coordinates are out of valid range");
+        }
+      }
+
+      setEditValidationErrors(errors);
+      return errors.length === 0;
+    } catch (error) {
+      console.error("Error validating edit form:", error);
+      setEditValidationErrors(["Validation error occurred"]);
+      return false;
+    } finally {
+      setIsEditValidating(false);
+    }
+  };
+
+  // Check if edit form is valid (matching web client)
+  const isEditFormValid = (): boolean => {
+    // Basic info is required
+    const basicInfoValid =
+      editFormData.address.trim() !== "" &&
+      editFormData.houseNumber.trim() !== "" &&
+      editFormData.longitude.trim() !== "" &&
+      editFormData.latitude.trim() !== "";
+
+    // Last Visited is required ONLY when status is not "not-visited"
+    const statusValid =
+      (editFormData.status as string) === "not-visited" ||
+      ((editFormData.status as string) !== "not-visited" &&
+        editFormData.lastVisited.trim() !== "");
+
+    return basicInfoValid && statusValid;
+  };
+
+  // Handle use my current location (matching web client)
+  const handleEditUseMyLocation = async () => {
+    try {
+      setIsEditGettingLocation(true);
+      console.log("📍 Requesting location permission...");
+
+      // Request location permissions
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        console.error("❌ Location permission denied");
+        Alert.alert(
+          "Permission Denied",
+          "Location permission is required to use this feature. Please enable location access in your device settings."
+        );
+        setIsEditGettingLocation(false);
+        return;
+      }
+
+      console.log("✅ Permission granted, getting current location...");
+
+      // Get current location with high accuracy (matching web)
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+
+      const lat = location.coords.latitude;
+      const lng = location.coords.longitude;
+
+      console.log("📍 Location captured:", lat, lng);
+
+      // Update coordinates first (matching web behavior)
+      setEditFormData((prev) => ({
+        ...prev,
+        latitude: lat.toString(),
+        longitude: lng.toString(),
+      }));
+
+      // Reverse geocode to get address (matching web)
+      try {
+        const geocodeResult = await Location.reverseGeocodeAsync({
+          latitude: lat,
+          longitude: lng,
+        });
+
+        if (geocodeResult && geocodeResult.length > 0) {
+          const address = geocodeResult[0];
+          // Use type assertion since TypeScript types may not include all properties
+          const addr = address as any;
+          const formattedAddress = [
+            addr.streetNumber,
+            addr.street,
+            addr.city,
+            addr.region,
+            addr.postalCode,
+            addr.country,
+          ]
+            .filter(Boolean)
+            .join(", ");
+
+          // Extract house number from address (matching web)
+          const houseNumber =
+            addr.streetNumber || formattedAddress.match(/^(\d+)/)?.[1] || "";
+
+          console.log("📍 Reverse geocoding result:");
+          console.log("📍 Formatted address:", formattedAddress);
+          console.log("📍 House number:", houseNumber);
+
+          // Update form data with address and house number (matching web)
+          setEditFormData((prev) => ({
+            ...prev,
+            address: formattedAddress || prev.address,
+            houseNumber: houseNumber || prev.houseNumber,
+          }));
+
+          Alert.alert(
+            "Location Captured",
+            `Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}\n${
+              formattedAddress
+                ? `Address: ${formattedAddress}`
+                : "Address not found"
+            }`
+          );
+        } else {
+          console.warn("⚠️ No address found for location");
+          Alert.alert(
+            "Location Captured",
+            `Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(
+              6
+            )}\nAddress not found`
+          );
+        }
+      } catch (geocodeError) {
+        console.error("Geocoding error:", geocodeError);
+        Alert.alert(
+          "Location Captured",
+          `Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(
+            6
+          )}\nAddress lookup failed`
+        );
+      }
+    } catch (error: any) {
+      console.error("❌ Error getting location:", error);
+      setIsEditGettingLocation(false);
+
+      // Handle specific error cases (matching web)
+      let errorMessage = "Failed to get your location";
+      if (error.code === "E_LOCATION_UNAVAILABLE") {
+        errorMessage =
+          "Location services are unavailable. Please enable location services in your device settings.";
+      } else if (error.code === "E_LOCATION_TIMEOUT") {
+        errorMessage = "Location request timed out. Please try again.";
+      } else if (error.message?.includes("permission")) {
+        errorMessage =
+          "Location permission denied. Please enable location access in your device settings.";
+      } else if (error.message?.includes("unavailable")) {
+        errorMessage =
+          "Current location is unavailable. Make sure that location services are enabled.";
+      }
+
+      Alert.alert("Error", errorMessage);
+    } finally {
+      setIsEditGettingLocation(false);
+    }
+  };
+
+  // Fetch address suggestions from Google Places Autocomplete (matching web version)
+  const fetchAddressSuggestions = async (query: string) => {
+    if (!query || query.length < 3) {
+      setAddressSuggestions([]);
+      setShowAddressSuggestions(false);
+      return;
+    }
+
+    try {
+      setIsLoadingSuggestions(true);
+      const apiKey = "AIzaSyCe1aICpk2SmN3ArHwp-79FnsOk38k072M";
+      const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
+        query
+      )}&key=${apiKey}&types=address&components=country:ca`;
+
+      const response = await fetch(url);
+      const data = await response.json();
+
+      if (data.status === "OK" && data.predictions) {
+        setAddressSuggestions(data.predictions);
+        setShowAddressSuggestions(true);
+      } else {
+        setAddressSuggestions([]);
+        setShowAddressSuggestions(false);
+      }
+    } catch (error) {
+      console.error("Error fetching address suggestions:", error);
+      setAddressSuggestions([]);
+      setShowAddressSuggestions(false);
+    } finally {
+      setIsLoadingSuggestions(false);
+    }
+  };
+
+  // Debounce timer ref for address suggestions
+  const addressSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+
+  // Handle address input change with debounced autocomplete
+  const handleAddressInputChange = (value: string) => {
+    handleFormChange("address", value);
+
+    // Clear previous timeout
+    if (addressSearchTimeoutRef.current) {
+      clearTimeout(addressSearchTimeoutRef.current);
+    }
+
+    // Set new timeout for debounced search
+    addressSearchTimeoutRef.current = setTimeout(() => {
+      fetchAddressSuggestions(value);
+    }, 300);
+  };
+
+  // Handle address suggestion selection
+  const handleSelectAddressSuggestion = async (suggestion: any) => {
+    setEditFormData((prev) => ({
+      ...prev,
+      address: suggestion.description,
+    }));
+    setShowAddressSuggestions(false);
+    setAddressSuggestions([]);
+
+    // Automatically geocode the selected address
+    await handleAddressSearchForSuggestion(suggestion.description);
+  };
+
+  // Handle address search for selected suggestion
+  const handleAddressSearchForSuggestion = async (address: string) => {
+    if (!address.trim()) {
+      return;
+    }
+
+    try {
+      setIsEditValidating(true);
+      console.log("🔍 Finding exact coordinates for address:", address);
+
+      // Use expo-location geocoding to convert address to coordinates
+      const geocodeResult = await Location.geocodeAsync(address);
+
+      if (geocodeResult && geocodeResult.length > 0) {
+        const location = geocodeResult[0];
+        const lat = location.latitude;
+        const lng = location.longitude;
+
+        // Format address from geocoding result (expo-location structure)
+        const loc = location as any;
+        const formattedAddressParts = [
+          loc.streetNumber,
+          loc.street,
+          loc.city,
+          loc.region,
+          loc.postalCode,
+          loc.country,
+        ].filter(Boolean);
+
+        const formattedAddress =
+          formattedAddressParts.length > 0
+            ? formattedAddressParts.join(", ")
+            : address || `${lat}, ${lng}`;
+
+        // Extract house number from location data or formatted address
+        const houseNumber =
+          loc.streetNumber ||
+          formattedAddress.match(/^(\d+)/)?.[1] ||
+          editFormData.houseNumber;
+
+        // Update form with exact coordinates and formatted address
+        setEditFormData((prev) => ({
+          ...prev,
+          latitude: lat.toString(),
+          longitude: lng.toString(),
+          address: formattedAddress || prev.address,
+          houseNumber: houseNumber || prev.houseNumber,
+        }));
+
+        console.log("✅ Exact coordinates found:", lat, lng);
+      }
+    } catch (error) {
+      console.error("❌ Error finding exact coordinates:", error);
+    } finally {
+      setIsEditValidating(false);
+    }
+  };
+
+  // Handle address search (geocoding) - matching web client findExactCoordinates
+  const handleAddressSearch = async () => {
+    if (!editFormData.address.trim()) {
+      console.error("❌ Please enter an address");
+      Alert.alert("Error", "Please enter an address to search");
+      return;
+    }
+
+    try {
+      setIsEditValidating(true);
+      console.log(
+        "🔍 Finding exact coordinates for address:",
+        editFormData.address
+      );
+
+      // Use expo-location geocoding to convert address to coordinates
+      const geocodeResult = await Location.geocodeAsync(editFormData.address);
+
+      if (geocodeResult && geocodeResult.length > 0) {
+        const location = geocodeResult[0];
+        const lat = location.latitude;
+        const lng = location.longitude;
+
+        // Format address from geocoding result (expo-location structure)
+        // expo-location returns properties like: streetNumber, street, city, region, postalCode, country
+        // Using type assertion since TypeScript types may not include all properties
+        const loc = location as any;
+        const formattedAddressParts = [
+          loc.streetNumber,
+          loc.street,
+          loc.city,
+          loc.region,
+          loc.postalCode,
+          loc.country,
+        ].filter(Boolean);
+
+        // If no formatted parts, use original address or create from coordinates
+        const formattedAddress =
+          formattedAddressParts.length > 0
+            ? formattedAddressParts.join(", ")
+            : editFormData.address || `${lat}, ${lng}`;
+
+        console.log("🎯 Geocoding Results:");
+        console.log("📍 Original Address:", editFormData.address);
+        console.log("📍 Formatted Address:", formattedAddress);
+        console.log("📍 Coordinates:", lat, lng);
+        console.log(
+          "📍 Full location data:",
+          JSON.stringify(location, null, 2)
+        );
+
+        // Extract house number from location data or formatted address
+        const houseNumber =
+          loc.streetNumber ||
+          formattedAddress.match(/^(\d+)/)?.[1] ||
+          editFormData.houseNumber;
+
+        // Update form with exact coordinates and formatted address (matching web)
+        setEditFormData((prev) => ({
+          ...prev,
+          latitude: lat.toString(),
+          longitude: lng.toString(),
+          address: formattedAddress || prev.address, // Update with formatted address
+          houseNumber: houseNumber || prev.houseNumber,
+        }));
+
+        console.log("✅ Exact coordinates found:", lat, lng);
+        Alert.alert(
+          "Success",
+          `Coordinates found: ${lat.toFixed(6)}, ${lng.toFixed(6)}`
+        );
+      } else {
+        console.error("❌ No location data found for this address");
+        Alert.alert("Error", "No location data found for this address");
+      }
+    } catch (error) {
+      console.error("❌ Error finding exact coordinates:", error);
+      Alert.alert(
+        "Error",
+        "Failed to find coordinates. Please check the address and try again."
+      );
+    } finally {
+      setIsEditValidating(false);
+    }
+  };
+
+  // Handle update resident (matching web client)
+  const handleUpdateResident = async () => {
+    if (!selectedProperty) return;
+
+    // Use editPropertyId if available, otherwise selectedProperty._id
+    const propertyId = editPropertyId || selectedProperty._id;
+
+    try {
+      setIsUpdatingResident(true);
+
+      const updateData = {
+        address: editFormData.address,
+        houseNumber: editFormData.houseNumber
+          ? parseInt(editFormData.houseNumber)
+          : undefined,
+        coordinates: [
+          parseFloat(editFormData.longitude),
+          parseFloat(editFormData.latitude),
+        ],
+        status: editFormData.status,
+        lastVisited: editFormData.lastVisited || undefined,
+        notes: editFormData.notes || undefined,
+        phone: editFormData.phone || undefined,
+        email: editFormData.email || undefined,
+        ownerName: editFormData.ownerName || undefined,
+        ownerPhone: editFormData.ownerPhone || undefined,
+        ownerEmail: editFormData.ownerEmail || undefined,
+        ownerMailingAddress: editFormData.ownerMailingAddress || undefined,
+      };
+
+      console.log("🔄 Updating resident:", propertyId, updateData);
+
+      const response = await apiInstance.put(
+        `/residents/${propertyId}`,
+        updateData
+      );
+
+      console.log("✅ Update response:", response.data);
+
+      if (response.data.success) {
+        // Show success message (matching web version toast)
+        Alert.alert(
+          "Success",
+          "Resident updated successfully! You can continue editing or close the modal."
+        );
+
+        // Invalidate and refetch property details cache
+        queryClient.invalidateQueries({
+          queryKey: ["propertyDetails", propertyId],
+        });
+
+        // Also invalidate territory map view to refresh the list
+        queryClient.invalidateQueries({
+          queryKey: ["territoryMapView", territoryId],
+        });
+
+        // Invalidate dashboard query cache to refresh statistics (matching web)
+        queryClient.invalidateQueries({ queryKey: ["myTerritories"] });
+
+        // Also invalidate admin dashboard queries (matching web)
+        queryClient.invalidateQueries({
+          queryKey: ["admin", "team-performance"],
+        });
+        queryClient.invalidateQueries({
+          queryKey: ["admin", "territory-stats"],
+        });
+        queryClient.invalidateQueries({
+          queryKey: ["admin", "assignment-status"],
+        });
+
+        // Update the local state
+        setProperties((prev) =>
+          prev.map((prop) =>
+            prop._id === propertyId
+              ? {
+                  ...prop,
+                  address: updateData.address,
+                  houseNumber: updateData.houseNumber || prop.houseNumber,
+                  coordinates: updateData.coordinates as [number, number],
+                  status: updateData.status,
+                  lastVisited: updateData.lastVisited,
+                  ...(response.data.data?.lastUpdatedBy && {
+                    lastUpdatedBy: response.data.data.lastUpdatedBy,
+                  }),
+                  notes: updateData.notes,
+                  phone: updateData.phone,
+                  email: updateData.email,
+                }
+              : prop
+          )
+        );
+
+        // Update filtered properties
+        setFilteredProperties((prev) =>
+          prev.map((prop) =>
+            prop._id === propertyId
+              ? {
+                  ...prop,
+                  address: updateData.address,
+                  houseNumber: updateData.houseNumber || prop.houseNumber,
+                  coordinates: updateData.coordinates as [number, number],
+                  status: updateData.status,
+                  lastVisited: updateData.lastVisited,
+                  ...(response.data.data?.lastUpdatedBy && {
+                    lastUpdatedBy: response.data.data.lastUpdatedBy,
+                  }),
+                  notes: updateData.notes,
+                  phone: updateData.phone,
+                  email: updateData.email,
+                }
+              : prop
+          )
+        );
+
+        // Update selected property (matching web version)
+        setSelectedProperty((prev) =>
+          prev && prev._id === propertyId
+            ? {
+                ...prev,
+                address: updateData.address,
+                houseNumber: updateData.houseNumber || prev.houseNumber,
+                coordinates: updateData.coordinates as [number, number],
+                status: updateData.status,
+                lastVisited: updateData.lastVisited,
+                ...(response.data.data?.lastUpdatedBy && {
+                  lastUpdatedBy: response.data.data.lastUpdatedBy,
+                }),
+                notes: updateData.notes,
+                phone: updateData.phone,
+                email: updateData.email,
+              }
+            : prev
+        );
+
+        // Modal stays open - user can continue editing or close manually (matching web)
+        // React Query will automatically refetch detailedProperty when needed
+      }
+    } catch (error: any) {
+      console.error("Error updating resident:", error);
+
+      // Show user-friendly error message (matching web version)
+      let errorMessage = "Failed to update property. Please try again.";
+
+      if (error.response?.status === 403) {
+        errorMessage =
+          "Permission denied. You may not have permission to update this property, or your session may have expired. Please try logging in again.";
+      } else if (error.response?.status === 401) {
+        errorMessage = "Your session has expired. Please log in again.";
+      } else if (error.response?.status === 400) {
+        errorMessage =
+          error.response?.data?.message ||
+          "Invalid data. Please check your input and try again.";
+      } else if (error.response?.status >= 500) {
+        errorMessage = "Server error. Please try again later.";
+      } else if (!error.response) {
+        errorMessage =
+          "Network error. Please check your connection and try again.";
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      }
+
+      Alert.alert("Error", errorMessage);
+    } finally {
+      setIsUpdatingResident(false);
+    }
+  };
+
+  // Handle close edit modal
+  const handleCloseEditModal = () => {
+    setIsEditModalOpen(false);
+    setEditPropertyId(null); // Clear edit property ID to stop query
+    setEditFormData({
+      address: "",
+      houseNumber: "",
+      longitude: "",
+      latitude: "",
+      status: "not-visited",
+      lastVisited: "",
+      notes: "",
+      phone: "",
+      email: "",
+      ownerName: "",
+      ownerPhone: "",
+      ownerEmail: "",
+      ownerMailingAddress: "",
+    });
+    setEditValidationErrors([]);
+  };
+
+  // ========== Add Property Handlers ==========
+
+  // Handle open add modal
+  const handleOpenAddModal = () => {
+    setIsAddModalOpen(true);
+    setSelectedProperty(null); // Close any selected property
+  };
+
+  // Handle close add modal
+  const handleCloseAddModal = () => {
+    setIsAddModalOpen(false);
+  };
+
+  // Handle add property success
+  const handleAddPropertySuccess = (newProperty: Property) => {
+    setProperties((prev) => [...prev, newProperty]);
+    setFilteredProperties((prev) => [...prev, newProperty]);
+  };
+
+  // Track sheet index for conditional rendering
+  const [currentSheetIndex, setCurrentSheetIndex] = useState(0);
+
+  // Handle sheet changes
+  const handleSheetChanges = useCallback((index: number) => {
+    setCurrentSheetIndex(index);
+  }, []);
+
+  // Get marker color based on status
+  const getMarkerColor = (status: Property["status"]): string => {
+    return statusColors[status] || statusColors["not-visited"];
+  };
+
+  // Get status display name with emojis (matching web client)
+  const getStatusDisplayName = (status: Property["status"]): string => {
+    const statusMap: Record<Property["status"], string> = {
+      "not-visited": "⏳ Not Visited",
+      interested: "✓ Interested",
+      visited: "✓ Visited",
+      callback: "📞 Callback",
+      appointment: "📅 Appointment",
+      "follow-up": "🔄 Follow-up",
+      "not-interested": "❌ Not Interested",
+    };
+    return statusMap[status] || "⏳ Not Visited";
+  };
+
+  // Get status display name without emoji (for legend)
+  const getStatusDisplayNamePlain = (status: Property["status"]): string => {
+    const statusMap: Record<Property["status"], string> = {
+      "not-visited": "Not Visited",
+      interested: "Interested",
+      visited: "Visited",
+      callback: "Callback",
+      appointment: "Appointment",
+      "follow-up": "Follow-up",
+      "not-interested": "Not Interested",
+    };
+    return statusMap[status] || "Not Visited";
+  };
+
+  // Calculate status counts (matching web version)
+  const statusCounts = useMemo(() => {
+    const counts: Record<Property["status"], number> = {
+      "not-visited": 0,
+      interested: 0,
+      visited: 0,
+      callback: 0,
+      appointment: 0,
+      "follow-up": 0,
+      "not-interested": 0,
+    };
+
+    properties.forEach((property) => {
+      if (property.status && counts.hasOwnProperty(property.status)) {
+        counts[property.status] = (counts[property.status] || 0) + 1;
+      }
+    });
+
+    return counts;
+  }, [properties]);
+
+  // Get short address (house number + street name without full address)
+  const getShortAddress = (property: Property): string => {
+    const addressParts = property.address.split(",")[0].split(" ");
+    const streetName = addressParts.slice(1).join(" ");
+    return `${property.houseNumber} ${streetName}`;
+  };
+
+  // Map status to pinColor (react-native-maps only supports predefined colors)
+  const getPinColor = (
+    status: Property["status"]
+  ): "red" | "green" | "purple" | "orange" | "blue" | "gray" => {
+    const colorMap: Record<
+      Property["status"],
+      "red" | "green" | "purple" | "orange" | "blue" | "gray"
+    > = {
+      "not-visited": "red",
+      interested: "orange",
+      visited: "green",
+      callback: "purple",
+      appointment: "blue",
+      "follow-up": "purple",
+      "not-interested": "gray",
+    };
+    return colorMap[status] || "red";
+  };
+
+  console.log("🎯 Render decision point:", {
+    isLoading,
+    hasError: !!error,
+    hasData: !!data,
+    hasTerritory: !!territory,
+    showMap,
+    hasInitialRegion: !!initialRegion,
+    timestamp: new Date().toISOString(),
+  });
+
+  if (isLoading) {
+    console.log("⏳ Rendering: Loading state");
+    return (
+      <View style={styles.container}>
+        <StatusBar
+          barStyle="light-content"
+          backgroundColor={COLORS.primary[500]}
+        />
+        <AppHeader
+          title="Map View"
+          showBackButton={true}
+          onBackPress={handleBack}
+          backgroundColor={COLORS.primary[500]}
+          textColor={COLORS.white}
+        />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.primary[500]} />
+          <Text style={styles.loadingText}>Loading territory map...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Only show error if loading is complete AND there's an actual error
+  // Don't show error if data is loaded successfully but territory state hasn't updated yet (race condition)
+  if (!isLoading && error && !data?.success) {
+    console.error("❌ Rendering: Error state", {
+      error: error?.message,
+      hasData: !!data,
+      hasTerritory: !!territory,
+      dataSuccess: data?.success,
+    });
+    return (
+      <View style={styles.container}>
+        <StatusBar
+          barStyle="light-content"
+          backgroundColor={COLORS.primary[500]}
+        />
+        <AppHeader
+          title="Map View"
+          showBackButton={true}
+          onBackPress={handleBack}
+          backgroundColor={COLORS.primary[500]}
+          textColor={COLORS.white}
+        />
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Failed to load territory map</Text>
+          <Body2 color={COLORS.text.secondary} style={styles.errorSubtext}>
+            {error ? "Please try again later" : "Territory not found"}
+          </Body2>
+        </View>
+      </View>
+    );
+  }
+
+  // Show error only if data was fetched but zone is missing (not a race condition)
+  if (
+    !isLoading &&
+    data?.success &&
+    data?.data &&
+    !data?.data?.zone &&
+    !territory
+  ) {
+    console.error("❌ Rendering: Error state - Zone not found in data", {
+      hasData: !!data,
+      hasZone: !!data?.data?.zone,
+      hasTerritory: !!territory,
+    });
+    return (
+      <View style={styles.container}>
+        <StatusBar
+          barStyle="light-content"
+          backgroundColor={COLORS.primary[500]}
+        />
+        <AppHeader
+          title="Map View"
+          showBackButton={true}
+          onBackPress={handleBack}
+          backgroundColor={COLORS.primary[500]}
+          textColor={COLORS.white}
+        />
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Failed to load territory map</Text>
+          <Body2 color={COLORS.text.secondary} style={styles.errorSubtext}>
+            Territory not found
+          </Body2>
+        </View>
+      </View>
+    );
+  }
+
+  // Don't render map if territory is still loading or not available
+  if (!territory) {
+    console.log("⏸️ Rendering: Waiting for territory data");
+    return (
+      <View style={styles.container}>
+        <StatusBar
+          barStyle="light-content"
+          backgroundColor={COLORS.primary[500]}
+        />
+        <AppHeader
+          title="Map View"
+          showBackButton={true}
+          onBackPress={handleBack}
+          backgroundColor={COLORS.primary[500]}
+          textColor={COLORS.white}
+        />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.primary[500]} />
+          <Text style={styles.loadingText}>Loading territory map...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  console.log("✅ Rendering: Main map view");
+
+  return (
+    <View style={styles.container}>
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor={COLORS.primary[500]}
+      />
+      <AppHeader
+        title={territory.name || "Map View"}
+        subtext={`${properties.length} properties`}
+        showBackButton={true}
+        onBackPress={handleBack}
+        backgroundColor={COLORS.primary[500]}
+        textColor={COLORS.white}
+      />
+
+      {/* Status Legend - Horizontal Scrollable (matching web version) */}
+      <View style={styles.statusLegendContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.statusLegendContent}
+        >
+          {/* Add Property Button - First item in scrollable legend */}
+          <TouchableOpacity
+            style={styles.addPropertyButton}
+            onPress={handleOpenAddModal}
+            activeOpacity={0.7}
+          >
+            <Ionicons
+              name="add-circle-outline"
+              size={responsiveScale(16)}
+              color={COLORS.primary[500]}
+            />
+            <Text style={styles.addPropertyButtonText}>Add Property</Text>
+          </TouchableOpacity>
+
+          {/* Status Legend Items */}
+          {Object.entries(statusColors).map(([status, color]) => {
+            const count = statusCounts[status as Property["status"]] || 0;
+            return (
+              <View key={status} style={styles.statusLegendItem}>
+                <View
+                  style={[styles.statusLegendDot, { backgroundColor: color }]}
+                />
+                <Text style={styles.statusLegendText}>
+                  {getStatusDisplayNamePlain(status as Property["status"])}
+                </Text>
+                <Text style={styles.statusLegendCount}>({count})</Text>
+              </View>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      {/* Map View */}
+      <View style={styles.mapContainer}>
+        {(() => {
+          console.log("🎨 Rendering MapView container", {
+            showMap,
+            hasInitialRegion: !!initialRegion,
+            initialRegion,
+            timestamp: new Date().toISOString(),
+          });
+          return null;
+        })()}
+        {showMap && initialRegion ? (
+          (() => {
+            console.log("🗺️ Rendering MapView component", {
+              initialRegion,
+              boundaryCoordinatesCount: boundaryCoordinates.length,
+              timestamp: new Date().toISOString(),
+            });
+            return (
+              <MapView
+                ref={mapRef}
+                style={styles.map}
+                provider={PROVIDER_GOOGLE}
+                initialRegion={initialRegion}
+                region={initialRegion}
+                mapType="standard"
+                showsUserLocation={false}
+                showsMyLocationButton={false}
+                showsCompass={true}
+                zoomEnabled={true}
+                scrollEnabled={true}
+                rotateEnabled={true}
+                pitchEnabled={false}
+                loadingEnabled={true}
+                renderToHardwareTextureAndroid={true}
+                onPress={(event) => {
+                  // Handle map click when add modal is open (matching web version)
+                  if (isAddModalOpen && event.nativeEvent.coordinate) {
+                    const { latitude, longitude } =
+                      event.nativeEvent.coordinate;
+                    addPropertyModalRef.current?.updateCoordinates(
+                      latitude,
+                      longitude
+                    );
+                  }
+                }}
+                onMapReady={() => {
+                  console.log("✅ MapView onMapReady callback fired");
+                  console.log("✅ Map is ready", {
+                    hasMapRef: !!mapRef.current,
+                    boundaryCoordinatesCount: boundaryCoordinates.length,
+                    timestamp: new Date().toISOString(),
+                  });
+                  // Fit map to coordinates after map is ready
+                  if (mapRef.current && boundaryCoordinates.length > 0) {
+                    console.log("📍 Fitting map to boundary coordinates...");
+                    setTimeout(() => {
+                      try {
+                        mapRef.current?.fitToCoordinates(boundaryCoordinates, {
+                          edgePadding: {
+                            top: 50,
+                            right: 50,
+                            bottom: 50,
+                            left: 50,
+                          },
+                          animated: true,
+                        });
+                        console.log(
+                          "✅ Map fitted to coordinates successfully"
+                        );
+                      } catch (err) {
+                        console.error(
+                          "❌ Error fitting map to coordinates:",
+                          err
+                        );
+                      }
+                    }, 500);
+                  } else {
+                    console.warn(
+                      "⚠️ Cannot fit map - missing mapRef or boundary coordinates"
+                    );
+                  }
+                }}
+              >
+                {/* Territory Boundary Polygon */}
+                {boundaryCoordinates.length > 0 && (
+                  <Polygon
+                    coordinates={boundaryCoordinates}
+                    strokeColor={COLORS.primary[500]}
+                    fillColor={COLORS.primary[200] + "80"} // 50% opacity
+                    strokeWidth={2}
+                  />
+                )}
+
+                {/* Property Markers - Show filtered properties */}
+                {filteredProperties.map((property) => (
+                  <Marker
+                    key={property._id}
+                    coordinate={{
+                      latitude: property.coordinates[1],
+                      longitude: property.coordinates[0],
+                    }}
+                    pinColor={getPinColor(property.status)}
+                    onPress={() => handlePropertyPress(property)}
+                    title={property.address}
+                    description={`House #${
+                      property.houseNumber
+                    } - ${property.status.replace("-", " ")}`}
+                  />
+                ))}
+              </MapView>
+            );
+          })()
+        ) : (
+          <View style={styles.mapPlaceholder}>
+            {(() => {
+              console.log("⏳ Showing map placeholder", {
+                showMap,
+                hasInitialRegion: !!initialRegion,
+                isLoading,
+                timestamp: new Date().toISOString(),
+              });
+              return null;
+            })()}
+            <ActivityIndicator size="large" color={COLORS.primary[500]} />
+            <Text style={styles.placeholderText}>
+              {initialRegion
+                ? "Initializing map..."
+                : "Calculating map region..."}
+            </Text>
+          </View>
+        )}
+      </View>
+
+      {/* Property List Bottom Sheet */}
+      <BottomSheet
+        ref={bottomSheetRef}
+        index={0}
+        snapPoints={snapPoints}
+        onChange={handleSheetChanges}
+        enablePanDownToClose={false}
+        enableDynamicSizing={false}
+        backgroundStyle={styles.bottomSheetBackground}
+        handleIndicatorStyle={{ display: "none" }}
+      >
+        {/* Fixed Header and Filters - stays at top when scrolling */}
+        <View style={styles.bottomSheetHeaderContainer}>
+          {/* Drag Handle */}
+          <TouchableOpacity
+            style={styles.dragHandle}
+            onPress={() => {
+              if (currentSheetIndex === 0) {
+                bottomSheetRef.current?.snapToIndex(1);
+              } else {
+                bottomSheetRef.current?.snapToIndex(0);
+              }
+            }}
+            activeOpacity={0.7}
+          >
+            <View style={styles.dragHandleBar} />
+          </TouchableOpacity>
+
+          {/* Header with Property Count */}
+          <View style={styles.listHeader}>
+            <View style={styles.listHeaderContent}>
+              <Text style={styles.listHeaderTitle}>Properties</Text>
+              <Text style={styles.listHeaderCount}>
+                {filteredProperties.length}{" "}
+                {filteredProperties.length === 1 ? "property" : "properties"}
+                {filteredProperties.length !== properties.length &&
+                  ` of ${properties.length}`}
+              </Text>
+            </View>
+            {currentSheetIndex === 1 && (
+              <TouchableOpacity
+                style={styles.closeListButton}
+                onPress={() => bottomSheetRef.current?.snapToIndex(0)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.closeListButtonText}>✕</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Stats Cards (matching web client) */}
+          {currentSheetIndex === 1 && (
+            <View style={styles.statsContainer}>
+              {/* Total Homes Card - Gradient: indigo-500 via purple-500 to pink-500 */}
+              <LinearGradient
+                colors={["#6366F1", "#A855F7", "#EC4899"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.statCard}
+              >
+                <Ionicons
+                  name="home"
+                  size={responsiveScale(20)}
+                  color={COLORS.white}
+                />
+                <Text style={styles.statCardValue}>{stats.totalHomes}</Text>
+                <Text style={styles.statCardLabel}>Total Homes</Text>
+              </LinearGradient>
+
+              {/* Visited Card - Gradient: emerald-400 via teal-500 to cyan-500 */}
+              <LinearGradient
+                colors={["#34D399", "#14B8A6", "#06B6D4"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.statCard}
+              >
+                <Ionicons
+                  name="checkmark-circle"
+                  size={responsiveScale(20)}
+                  color={COLORS.white}
+                />
+                <Text style={styles.statCardValue}>{stats.visited}</Text>
+                <Text style={styles.statCardLabel}>Visited</Text>
+              </LinearGradient>
+
+              {/* Remaining Card - Gradient: amber-400 via orange-500 to red-500 */}
+              <LinearGradient
+                colors={["#FBBF24", "#F97316", "#EF4444"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.statCard}
+              >
+                <Ionicons
+                  name="time-outline"
+                  size={responsiveScale(20)}
+                  color={COLORS.white}
+                />
+                <Text style={styles.statCardValue}>{stats.remaining}</Text>
+                <Text style={styles.statCardLabel}>Remaining</Text>
+              </LinearGradient>
+            </View>
+          )}
+
+          {/* Fixed Filters Section - doesn't scroll */}
+          {currentSheetIndex === 1 && (
+            <View style={styles.filtersContainer}>
+              {/* Search Input */}
+              <View style={styles.searchContainer}>
+                <Ionicons
+                  name="search-outline"
+                  size={responsiveScale(18)}
+                  color={COLORS.text.secondary}
+                  style={styles.searchIcon}
+                />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Search by address or house number"
+                  placeholderTextColor={COLORS.text.light}
+                  value={searchTerm}
+                  onChangeText={setSearchTerm}
+                />
+                {searchTerm.length > 0 && (
+                  <TouchableOpacity
+                    onPress={() => setSearchTerm("")}
+                    style={styles.clearSearchButton}
+                  >
+                    <Ionicons
+                      name="close-circle"
+                      size={responsiveScale(18)}
+                      color={COLORS.text.secondary}
+                    />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* Sort Buttons */}
+              <View style={styles.sortButtonsContainer}>
+                <TouchableOpacity
+                  style={[
+                    styles.sortButton,
+                    sortBy === "Sequential" && styles.sortButtonActive,
+                  ]}
+                  onPress={() => setSortBy("Sequential")}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.sortButtonText,
+                      ...(sortBy === "Sequential"
+                        ? [styles.sortButtonTextActive]
+                        : []),
+                    ]}
+                  >
+                    Sequential
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.sortButton,
+                    ...(sortBy === "Odd" ? [styles.sortButtonActive] : []),
+                  ]}
+                  onPress={() => setSortBy("Odd")}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.sortButtonText,
+                      ...(sortBy === "Odd"
+                        ? [styles.sortButtonTextActive]
+                        : []),
+                    ]}
+                  >
+                    Odd
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.sortButton,
+                    ...(sortBy === "Even" ? [styles.sortButtonActive] : []),
+                  ]}
+                  onPress={() => setSortBy("Even")}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.sortButtonText,
+                      ...(sortBy === "Even"
+                        ? [styles.sortButtonTextActive]
+                        : []),
+                    ]}
+                  >
+                    Even
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Filter Dropdowns */}
+              <View style={styles.filterDropdownsContainer}>
+                {/* Status Filter */}
+                <View style={styles.filterDropdownWrapper}>
+                  <TouchableOpacity
+                    style={styles.filterDropdown}
+                    onPress={() => setStatusDropdownVisible(true)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.filterDropdownText}>
+                      {statusFilter === "All Status"
+                        ? "All Status"
+                        : getStatusDisplayName(
+                            statusFilter as Property["status"]
+                          )}
+                    </Text>
+                    <Ionicons
+                      name="chevron-down"
+                      size={responsiveScale(16)}
+                      color={COLORS.text.secondary}
+                    />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Data Source Filter */}
+                <View style={styles.filterDropdownWrapper}>
+                  <TouchableOpacity
+                    style={styles.filterDropdown}
+                    onPress={() => setDataSourceDropdownVisible(true)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.filterDropdownText}>
+                      {dataSourceFilter === "All Sources"
+                        ? "All Sources"
+                        : dataSourceFilter === "AUTO"
+                        ? "Auto-Detected"
+                        : "Manually Added"}
+                    </Text>
+                    <Ionicons
+                      name="chevron-down"
+                      size={responsiveScale(16)}
+                      color={COLORS.text.secondary}
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          )}
+        </View>
+
+        {/* Scrollable Property List */}
+        <BottomSheetScrollView
+          style={styles.propertyListScroll}
+          contentContainerStyle={styles.propertyListContent}
+          showsVerticalScrollIndicator={true}
+        >
+          {filteredProperties.length === 0 ? (
+            <View style={styles.emptyStateContainer}>
+              <Ionicons
+                name="search-outline"
+                size={responsiveScale(48)}
+                color={COLORS.text.light}
+              />
+              <Text style={styles.emptyStateText}>No properties found</Text>
+              <Body2
+                color={COLORS.text.secondary}
+                style={styles.emptyStateSubtext}
+              >
+                Try adjusting your filters or search term
+              </Body2>
+            </View>
+          ) : (
+            filteredProperties.map((property) => (
+              <TouchableOpacity
+                key={property._id}
+                style={[
+                  styles.propertyCard,
+                  highlightedPropertyId === property._id &&
+                    styles.propertyCardHighlighted,
+                ]}
+                onPress={() => handlePropertyClick(property)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.propertyCardContent}>
+                  {/* Header: Address with Data Source Badge and Status Badge */}
+                  <View style={styles.propertyCardHeader}>
+                    <View style={styles.propertyCardTopRow}>
+                      <View style={styles.propertyCardAddressRow}>
+                        <Text
+                          style={styles.propertyCardAddress}
+                          numberOfLines={2}
+                        >
+                          {property.address}
+                        </Text>
+                        {property.dataSource && (
+                          <View
+                            style={[
+                              styles.dataSourceBadge,
+                              property.dataSource === "MANUAL"
+                                ? styles.dataSourceBadgeManual
+                                : styles.dataSourceBadgeAuto,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.dataSourceBadgeText,
+                                property.dataSource === "MANUAL"
+                                  ? styles.dataSourceBadgeTextManual
+                                  : styles.dataSourceBadgeTextAuto,
+                              ]}
+                            >
+                              {property.dataSource === "MANUAL"
+                                ? "Manual"
+                                : "Auto"}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      <View style={styles.propertyCardRight}>
+                        <View
+                          style={[
+                            styles.statusBadge,
+                            {
+                              backgroundColor:
+                                getMarkerColor(property.status) + "20",
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.statusBadgeText,
+                              { color: getMarkerColor(property.status) },
+                            ]}
+                          >
+                            {getStatusDisplayName(property.status)}
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          style={styles.editButton}
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            handleEditProperty(property);
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons
+                            name="create-outline"
+                            size={responsiveScale(16)}
+                            color={COLORS.text.secondary}
+                          />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Footer: House Number + Short Address */}
+                  <View style={styles.propertyCardFooter}>
+                    <Text style={styles.propertyCardShortAddress}>
+                      {getShortAddress(property)}
+                    </Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ))
+          )}
+        </BottomSheetScrollView>
+      </BottomSheet>
+
+      {/* Status Filter Modal */}
+      <Modal
+        visible={statusDropdownVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setStatusDropdownVisible(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setStatusDropdownVisible(false)}
+        >
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Filter by Status</Text>
+              <TouchableOpacity
+                onPress={() => setStatusDropdownVisible(false)}
+                style={styles.modalCloseButton}
+              >
+                <Ionicons
+                  name="close"
+                  size={responsiveScale(24)}
+                  color={COLORS.text.primary}
+                />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.modalOptions}>
+              <Pressable
+                style={[
+                  styles.modalOption,
+                  statusFilter === "All Status" && styles.modalOptionActive,
+                ]}
+                onPress={() => {
+                  setStatusFilter("All Status");
+                  setStatusDropdownVisible(false);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.modalOptionText,
+                    ...(statusFilter === "All Status"
+                      ? [styles.modalOptionTextActive]
+                      : []),
+                  ]}
+                >
+                  All Status
+                </Text>
+              </Pressable>
+              {(
+                [
+                  "not-visited",
+                  "interested",
+                  "visited",
+                  "callback",
+                  "appointment",
+                  "follow-up",
+                  "not-interested",
+                ] as Property["status"][]
+              ).map((status) => (
+                <Pressable
+                  key={status}
+                  style={[
+                    styles.modalOption,
+                    ...(statusFilter === status
+                      ? [styles.modalOptionActive]
+                      : []),
+                  ]}
+                  onPress={() => {
+                    setStatusFilter(status);
+                    setStatusDropdownVisible(false);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.modalOptionText,
+                      ...(statusFilter === status
+                        ? [styles.modalOptionTextActive]
+                        : []),
+                    ]}
+                  >
+                    {getStatusDisplayName(status)}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Data Source Filter Modal */}
+      <Modal
+        visible={dataSourceDropdownVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setDataSourceDropdownVisible(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setDataSourceDropdownVisible(false)}
+        >
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Filter by Source</Text>
+              <TouchableOpacity
+                onPress={() => setDataSourceDropdownVisible(false)}
+                style={styles.modalCloseButton}
+              >
+                <Ionicons
+                  name="close"
+                  size={responsiveScale(24)}
+                  color={COLORS.text.primary}
+                />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.modalOptions}>
+              <Pressable
+                style={[
+                  styles.modalOption,
+                  dataSourceFilter === "All Sources" &&
+                    styles.modalOptionActive,
+                ]}
+                onPress={() => {
+                  setDataSourceFilter("All Sources");
+                  setDataSourceDropdownVisible(false);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.modalOptionText,
+                    ...(dataSourceFilter === "All Sources"
+                      ? [styles.modalOptionTextActive]
+                      : []),
+                  ]}
+                >
+                  All Sources
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.modalOption,
+                  ...(dataSourceFilter === "AUTO"
+                    ? [styles.modalOptionActive]
+                    : []),
+                ]}
+                onPress={() => {
+                  setDataSourceFilter("AUTO");
+                  setDataSourceDropdownVisible(false);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.modalOptionText,
+                    ...(dataSourceFilter === "AUTO"
+                      ? [styles.modalOptionTextActive]
+                      : []),
+                  ]}
+                >
+                  Auto-Detected
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.modalOption,
+                  ...(dataSourceFilter === "MANUAL"
+                    ? [styles.modalOptionActive]
+                    : []),
+                ]}
+                onPress={() => {
+                  setDataSourceFilter("MANUAL");
+                  setDataSourceDropdownVisible(false);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.modalOptionText,
+                    ...(dataSourceFilter === "MANUAL"
+                      ? [styles.modalOptionTextActive]
+                      : []),
+                  ]}
+                >
+                  Manually Added
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Property Details Modal */}
+      <Modal
+        visible={isDetailModalOpen}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={handleCloseDetailModal}
+      >
+        <Pressable
+          style={styles.propertyModalOverlay}
+          onPress={handleCloseDetailModal}
+        >
+          <View style={styles.propertyModalContent}>
+            {/* Modal Header */}
+            <View style={styles.propertyModalHeader}>
+              <Text style={styles.propertyModalTitle}>Property Details</Text>
+              <View style={styles.propertyModalHeaderButtons}>
+                {selectedProperty && (
+                  <TouchableOpacity
+                    onPress={() => handleEditProperty(selectedProperty)}
+                    style={styles.propertyModalEditButton}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons
+                      name="create-outline"
+                      size={responsiveScale(20)}
+                      color={COLORS.primary[500]}
+                    />
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  onPress={handleCloseDetailModal}
+                  style={styles.propertyModalCloseButton}
+                >
+                  <Ionicons
+                    name="close"
+                    size={responsiveScale(24)}
+                    color={COLORS.text.primary}
+                  />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Modal Content */}
+            {isLoadingPropertyDetails ? (
+              <View style={styles.propertyModalLoading}>
+                <ActivityIndicator size="large" color={COLORS.primary[500]} />
+                <Text style={styles.propertyModalLoadingText}>
+                  Loading property details...
+                </Text>
+              </View>
+            ) : (
+              <ScrollView
+                style={styles.propertyModalScroll}
+                contentContainerStyle={styles.propertyModalScrollContent}
+                showsVerticalScrollIndicator={true}
+                nestedScrollEnabled={true}
+                bounces={false}
+              >
+                {detailedProperty ? (
+                  <>
+                    {/* Top Section - Header */}
+                    <View style={styles.propertyDetailHeader}>
+                      <View style={styles.propertyDetailHeaderRow}>
+                        <View
+                          style={[
+                            styles.propertyDetailIcon,
+                            {
+                              backgroundColor:
+                                getMarkerColor(
+                                  detailedProperty.resident?.status ||
+                                    "not-visited"
+                                ) + "20",
+                            },
+                          ]}
+                        >
+                          <Ionicons
+                            name="checkmark-circle"
+                            size={responsiveScale(24)}
+                            color={getMarkerColor(
+                              detailedProperty.resident?.status || "not-visited"
+                            )}
+                          />
+                        </View>
+                        <View style={styles.propertyDetailHeaderContent}>
+                          <Text style={styles.propertyDetailAddress}>
+                            {detailedProperty.resident?.address ||
+                              selectedProperty?.address}
+                          </Text>
+                          <View style={styles.propertyDetailStatusBadge}>
+                            <View
+                              style={[
+                                styles.propertyDetailStatusBadgeInner,
+                                {
+                                  backgroundColor:
+                                    getMarkerColor(
+                                      detailedProperty.resident?.status ||
+                                        "not-visited"
+                                    ) + "20",
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.propertyDetailStatusText,
+                                  {
+                                    color: getMarkerColor(
+                                      detailedProperty.resident?.status ||
+                                        "not-visited"
+                                    ),
+                                  },
+                                ]}
+                              >
+                                {getStatusDisplayName(
+                                  (detailedProperty.resident?.status ||
+                                    "not-visited") as Property["status"]
+                                )}
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+                      </View>
+
+                      {/* Property Details Row */}
+                      <View style={styles.propertyDetailStatsRow}>
+                        <View style={styles.propertyDetailStat}>
+                          <Ionicons
+                            name="calendar-outline"
+                            size={responsiveScale(16)}
+                            color={COLORS.text.secondary}
+                          />
+                          <Text style={styles.propertyDetailStatText}>
+                            {detailedProperty.propertyData?.yearBuilt
+                              ? `${
+                                  new Date().getFullYear() -
+                                  detailedProperty.propertyData.yearBuilt
+                                }+ years`
+                              : "20+ years"}
+                          </Text>
+                        </View>
+                        <View style={styles.propertyDetailStat}>
+                          <Ionicons
+                            name="home-outline"
+                            size={responsiveScale(16)}
+                            color={COLORS.text.secondary}
+                          />
+                          <Text style={styles.propertyDetailStatText}>
+                            {detailedProperty.propertyData?.bedrooms || 1}{" "}
+                            occupancy
+                          </Text>
+                        </View>
+                        <View style={styles.propertyDetailStat}>
+                          <Ionicons
+                            name="speedometer-outline"
+                            size={responsiveScale(16)}
+                            color={COLORS.text.secondary}
+                          />
+                          <Text style={styles.propertyDetailStatText}>
+                            {(() => {
+                              if (detailedProperty.propertyData?.leadScore) {
+                                const base =
+                                  Math.floor(
+                                    detailedProperty.propertyData.leadScore / 10
+                                  ) * 10;
+                                return `${base}-${base + 9}`;
+                              }
+                              if (
+                                detailedProperty.propertyData?.estimatedValue
+                              ) {
+                                const base = Math.floor(
+                                  detailedProperty.propertyData.estimatedValue /
+                                    1000
+                                );
+                                return `${base}-${base + 59}`;
+                              }
+                              return "740-799";
+                            })()}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    {/* Main Content Card */}
+                    <View style={styles.propertyDetailContentCard}>
+                      <Text style={styles.propertyDetailSectionTitle}>
+                        Contact Information
+                      </Text>
+
+                      {/* Contact Information */}
+                      {detailedProperty.resident?.phone && (
+                        <TouchableOpacity
+                          style={styles.propertyDetailContactRow}
+                          onPress={() =>
+                            handlePhonePress(detailedProperty.resident.phone)
+                          }
+                        >
+                          <Ionicons
+                            name="call-outline"
+                            size={responsiveScale(20)}
+                            color={COLORS.error[500]}
+                          />
+                          <Text style={styles.propertyDetailContactText}>
+                            {detailedProperty.resident.phone}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+
+                      {/* Owner Phone */}
+                      {detailedProperty.propertyData?.ownerPhone && (
+                        <TouchableOpacity
+                          style={styles.propertyDetailContactRow}
+                          onPress={() =>
+                            handlePhonePress(
+                              detailedProperty.propertyData.ownerPhone
+                            )
+                          }
+                        >
+                          <Ionicons
+                            name="call-outline"
+                            size={responsiveScale(20)}
+                            color={COLORS.error[500]}
+                          />
+                          <Text style={styles.propertyDetailContactText}>
+                            Owner: {detailedProperty.propertyData.ownerPhone}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+
+                      {/* Tags/Badges */}
+                      <View style={styles.propertyDetailTagsContainer}>
+                        {detailedProperty.resident?.houseNumber && (
+                          <View style={styles.propertyDetailTag}>
+                            <Text style={styles.propertyDetailTagText}>
+                              House #{detailedProperty.resident.houseNumber}
+                            </Text>
+                          </View>
+                        )}
+                        {detailedProperty.resident?.status && (
+                          <View style={styles.propertyDetailTag}>
+                            <Text style={styles.propertyDetailTagText}>
+                              {detailedProperty.resident.status}
+                            </Text>
+                          </View>
+                        )}
+                        {detailedProperty.resident?.email && (
+                          <View style={styles.propertyDetailTag}>
+                            <Text style={styles.propertyDetailTagText}>
+                              {detailedProperty.resident.email}
+                            </Text>
+                          </View>
+                        )}
+                        {detailedProperty.resident?.lastVisited && (
+                          <View style={styles.propertyDetailTag}>
+                            <Text style={styles.propertyDetailTagText}>
+                              Last:{" "}
+                              {new Date(
+                                detailedProperty.resident.lastVisited
+                              ).toLocaleDateString()}
+                            </Text>
+                          </View>
+                        )}
+                        {detailedProperty.resident?.assignedAgentId?.name && (
+                          <View style={styles.propertyDetailTag}>
+                            <Text style={styles.propertyDetailTagText}>
+                              Assigned:{" "}
+                              {detailedProperty.resident.assignedAgentId.name}
+                            </Text>
+                          </View>
+                        )}
+                        {detailedProperty.propertyData?.propertyType && (
+                          <View style={styles.propertyDetailTag}>
+                            <Text style={styles.propertyDetailTagText}>
+                              {detailedProperty.propertyData.propertyType.replace(
+                                "_",
+                                " "
+                              )}
+                            </Text>
+                          </View>
+                        )}
+                        {detailedProperty.propertyData?.bedrooms && (
+                          <View style={styles.propertyDetailTag}>
+                            <Text style={styles.propertyDetailTagText}>
+                              {detailedProperty.propertyData.bedrooms} bed
+                            </Text>
+                          </View>
+                        )}
+                        {detailedProperty.propertyData?.estimatedValue && (
+                          <View style={styles.propertyDetailTag}>
+                            <Text style={styles.propertyDetailTagText}>
+                              $
+                              {(
+                                detailedProperty.propertyData.estimatedValue /
+                                1000
+                              ).toFixed(0)}
+                              k
+                            </Text>
+                          </View>
+                        )}
+                        {detailedProperty.propertyData?.leadScore && (
+                          <View style={styles.propertyDetailTag}>
+                            <Text style={styles.propertyDetailTagText}>
+                              Score: {detailedProperty.propertyData.leadScore}
+                            </Text>
+                          </View>
+                        )}
+                        {detailedProperty.propertyData?.ownerName && (
+                          <View style={styles.propertyDetailTag}>
+                            <Text style={styles.propertyDetailTagText}>
+                              {detailedProperty.propertyData.ownerName}
+                            </Text>
+                          </View>
+                        )}
+                        {/* Additional Demographic Tags (matching web) */}
+                        {detailedProperty.propertyData?.estimatedValue && (
+                          <View style={styles.propertyDetailTag}>
+                            <Text style={styles.propertyDetailTagText}>
+                              $
+                              {(
+                                detailedProperty.propertyData.estimatedValue /
+                                1000
+                              ).toFixed(0)}
+                              k income
+                            </Text>
+                          </View>
+                        )}
+                        {detailedProperty.propertyData?.propertyType && (
+                          <View style={styles.propertyDetailTag}>
+                            <Text style={styles.propertyDetailTagText}>
+                              Homeowner
+                            </Text>
+                          </View>
+                        )}
+                        {detailedProperty.propertyData?.ownerName && (
+                          <View style={styles.propertyDetailTag}>
+                            <Text style={styles.propertyDetailTagText}>
+                              Office worker
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+
+                      {/* Zone Information */}
+                      {detailedProperty.zone && (
+                        <View style={styles.propertyDetailZoneInfo}>
+                          <Text style={styles.propertyDetailZoneText}>
+                            <Text style={styles.propertyDetailZoneLabel}>
+                              Zone:
+                            </Text>{" "}
+                            {detailedProperty.zone.name}
+                          </Text>
+                          {detailedProperty.zoneStats && (
+                            <Text style={styles.propertyDetailZoneText}>
+                              <Text style={styles.propertyDetailZoneLabel}>
+                                Progress:
+                              </Text>{" "}
+                              {detailedProperty.zoneStats.visitedResidents}/
+                              {detailedProperty.zoneStats.totalResidents}{" "}
+                              visited
+                            </Text>
+                          )}
+                        </View>
+                      )}
+                    </View>
+
+                    {/* Export Button */}
+                    <View style={styles.propertyDetailExportContainer}>
+                      <TouchableOpacity
+                        style={styles.propertyDetailExportButton}
+                        onPress={() => {
+                          // Export functionality will be added later
+                          console.log("Export CSV clicked");
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons
+                          name="download-outline"
+                          size={responsiveScale(16)}
+                          color={COLORS.white}
+                        />
+                        <Text style={styles.propertyDetailExportButtonText}>
+                          Export CSV
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                ) : (
+                  <View style={styles.propertyModalError}>
+                    <Text style={styles.propertyModalErrorText}>
+                      Failed to load property details
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.propertyModalErrorButton}
+                      onPress={handleCloseDetailModal}
+                    >
+                      <Text style={styles.propertyModalErrorButtonText}>
+                        Close
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </ScrollView>
+            )}
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Edit Property Modal */}
+      <Modal
+        visible={isEditModalOpen}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => {
+          // Prevent Android back button from closing modal
+          // Modal can only be closed via cross icon or cancel button
+        }}
+      >
+        <Pressable
+          style={styles.propertyModalOverlay}
+          onPress={() => {
+            // Prevent overlay click from closing modal
+            // Modal can only be closed via cross icon or cancel button
+          }}
+        >
+          <View style={styles.editModalContent}>
+            {/* Modal Header */}
+            <View style={styles.editModalHeader}>
+              <Text style={styles.editModalTitle}>Edit Property</Text>
+              <TouchableOpacity
+                onPress={handleCloseEditModal}
+                style={styles.propertyModalCloseButton}
+              >
+                <Ionicons
+                  name="close"
+                  size={responsiveScale(24)}
+                  color={COLORS.text.primary}
+                />
+              </TouchableOpacity>
+            </View>
+
+            {/* Modal Content (Loading or Form) */}
+            {isLoadingEditPropertyDetails ? (
+              <View style={styles.editModalLoading}>
+                <ActivityIndicator size="large" color={COLORS.primary[500]} />
+                <Text style={styles.editModalLoadingText}>
+                  Loading property details...
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.editModalScrollWrapper}>
+                <ScrollView
+                  style={styles.editModalScroll}
+                  contentContainerStyle={styles.editModalScrollContent}
+                  showsVerticalScrollIndicator={true}
+                  nestedScrollEnabled={true}
+                  bounces={false}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  {/* Basic Information Section */}
+                  <View style={styles.editFormSection}>
+                    <View style={styles.editFormSectionHeader}>
+                      <View style={styles.editFormSectionHeaderBar} />
+                      <Text style={styles.editFormSectionTitle}>
+                        Basic Information
+                      </Text>
+                    </View>
+
+                    <View style={styles.editFormFields}>
+                      {/* Address */}
+                      <View style={styles.editFormField}>
+                        <Text style={styles.editFormLabel}>Address</Text>
+                        <View style={styles.editFormInputContainer}>
+                          <TextInput
+                            ref={addressInputRef}
+                            style={styles.editFormInput}
+                            value={editFormData.address}
+                            onChangeText={handleAddressInputChange}
+                            placeholder="Enter full property address"
+                            editable={!isUpdatingResident}
+                            onFocus={() => {
+                              if (
+                                editFormData.address &&
+                                addressSuggestions.length === 0
+                              ) {
+                                fetchAddressSuggestions(editFormData.address);
+                              }
+                            }}
+                            onBlur={() => {
+                              // Delay hiding suggestions to allow selection
+                              setTimeout(() => {
+                                setShowAddressSuggestions(false);
+                              }, 200);
+                            }}
+                          />
+                          {isLoadingSuggestions && (
+                            <ActivityIndicator
+                              size="small"
+                              color={COLORS.primary[500]}
+                              style={styles.editFormSearchButton}
+                            />
+                          )}
+                          {!isLoadingSuggestions && (
+                            <TouchableOpacity
+                              style={styles.editFormSearchButton}
+                              onPress={handleAddressSearch}
+                              disabled={
+                                !editFormData.address || isUpdatingResident
+                              }
+                            >
+                              <Ionicons
+                                name="search-outline"
+                                size={responsiveScale(16)}
+                                color={
+                                  !editFormData.address || isUpdatingResident
+                                    ? COLORS.text.light
+                                    : COLORS.text.secondary
+                                }
+                              />
+                            </TouchableOpacity>
+                          )}
+                        </View>
+
+                        {/* Address Suggestions Dropdown */}
+                        {showAddressSuggestions &&
+                          addressSuggestions.length > 0 && (
+                            <View style={styles.addressSuggestionsContainer}>
+                              <ScrollView
+                                style={styles.addressSuggestionsList}
+                                keyboardShouldPersistTaps="handled"
+                              >
+                                {addressSuggestions.map((suggestion, index) => (
+                                  <TouchableOpacity
+                                    key={suggestion.place_id || index}
+                                    style={styles.addressSuggestionItem}
+                                    onPress={() =>
+                                      handleSelectAddressSuggestion(suggestion)
+                                    }
+                                  >
+                                    <Ionicons
+                                      name="location-outline"
+                                      size={responsiveScale(16)}
+                                      color={COLORS.primary[500]}
+                                      style={{
+                                        marginRight: responsiveSpacing(
+                                          SPACING.xs
+                                        ),
+                                      }}
+                                    />
+                                    <Text style={styles.addressSuggestionText}>
+                                      {suggestion.description}
+                                    </Text>
+                                  </TouchableOpacity>
+                                ))}
+                              </ScrollView>
+                            </View>
+                          )}
+                      </View>
+
+                      {/* House Number and Location */}
+                      <View style={styles.editFormRow}>
+                        <View style={[styles.editFormField, { flex: 1 }]}>
+                          <Text style={styles.editFormLabel}>House Number</Text>
+                          <TextInput
+                            style={styles.editFormInputStandalone}
+                            value={editFormData.houseNumber}
+                            onChangeText={(value) =>
+                              handleFormChange("houseNumber", value)
+                            }
+                            placeholder="Enter house number"
+                            keyboardType="numeric"
+                          />
+                        </View>
+                        <View style={[styles.editFormField, { flex: 1 }]}>
+                          <Text style={styles.editFormLabel}>Location</Text>
+                          <TouchableOpacity
+                            style={styles.editFormLocationButton}
+                            onPress={handleEditUseMyLocation}
+                            disabled={
+                              isUpdatingResident || isEditGettingLocation
+                            }
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons
+                              name="location-outline"
+                              size={responsiveScale(16)}
+                              color={COLORS.primary[500]}
+                            />
+                            <Text style={styles.editFormLocationButtonText}>
+                              {isEditGettingLocation
+                                ? "Getting..."
+                                : "Use My Location"}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+
+                      {/* Longitude and Latitude */}
+                      <View style={styles.editFormRow}>
+                        <View style={[styles.editFormField, { flex: 1 }]}>
+                          <Text style={styles.editFormLabel}>Longitude</Text>
+                          <TextInput
+                            style={styles.editFormInputStandalone}
+                            value={editFormData.longitude}
+                            onChangeText={(value) =>
+                              handleFormChange("longitude", value)
+                            }
+                            placeholder="Enter longitude"
+                            keyboardType="decimal-pad"
+                          />
+                        </View>
+                        <View style={[styles.editFormField, { flex: 1 }]}>
+                          <Text style={styles.editFormLabel}>Latitude</Text>
+                          <TextInput
+                            style={styles.editFormInputStandalone}
+                            value={editFormData.latitude}
+                            onChangeText={(value) =>
+                              handleFormChange("latitude", value)
+                            }
+                            placeholder="Enter latitude"
+                            keyboardType="decimal-pad"
+                          />
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Validation Errors */}
+                  {editValidationErrors.length > 0 && (
+                    <View style={styles.editFormErrorContainer}>
+                      <Text style={styles.editFormErrorTitle}>
+                        Please fix the following errors:
+                      </Text>
+                      {editValidationErrors.map((error, index) => (
+                        <Text key={index} style={styles.editFormErrorText}>
+                          • {error}
+                        </Text>
+                      ))}
+                    </View>
+                  )}
+
+                  {/* Validation Status */}
+                  {isEditValidating && (
+                    <View style={styles.editFormValidatingContainer}>
+                      <ActivityIndicator
+                        size="small"
+                        color={COLORS.primary[500]}
+                      />
+                      <Text style={styles.editFormValidatingText}>
+                        Validating location and checking requirements...
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Status & Tracking Section */}
+                  <View
+                    style={[
+                      styles.editFormSection,
+                      styles.editFormSectionGreen,
+                    ]}
+                  >
+                    <View style={styles.editFormSectionHeader}>
+                      <View
+                        style={[
+                          styles.editFormSectionHeaderBar,
+                          styles.editFormSectionHeaderBarGreen,
+                        ]}
+                      />
+                      <Text style={styles.editFormSectionTitle}>
+                        Status & Tracking
+                      </Text>
+                    </View>
+
+                    <View style={styles.editFormFields}>
+                      {/* Status */}
+                      <View style={styles.editFormField}>
+                        <Text style={styles.editFormLabel}>Status *</Text>
+                        <TouchableOpacity
+                          style={styles.editFormSelect}
+                          onPress={() => setEditStatusDropdownVisible(true)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.editFormSelectText}>
+                            {getStatusDisplayName(editFormData.status)}
+                          </Text>
+                          <Ionicons
+                            name="chevron-down"
+                            size={responsiveScale(16)}
+                            color={COLORS.text.secondary}
+                          />
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Last Visited */}
+                      <View style={styles.editFormField}>
+                        <Text style={styles.editFormLabel}>
+                          Last Visited{" "}
+                          {editFormData.status !== "not-visited" && (
+                            <Text style={styles.editFormRequired}>*</Text>
+                          )}
+                        </Text>
+                        <View style={styles.editFormInputContainer}>
+                          <TextInput
+                            style={styles.editFormInput}
+                            value={editFormData.lastVisited}
+                            onChangeText={(value) =>
+                              handleFormChange("lastVisited", value)
+                            }
+                            placeholder="YYYY-MM-DD"
+                            editable={false}
+                            onPressIn={() => setShowDatePicker(true)}
+                          />
+                          <TouchableOpacity
+                            style={styles.editFormDatePickerButton}
+                            onPress={() => setShowDatePicker(true)}
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons
+                              name="calendar-outline"
+                              size={responsiveScale(18)}
+                              color={COLORS.text.secondary}
+                            />
+                          </TouchableOpacity>
+                        </View>
+                        {editFormData.status !== "not-visited" &&
+                          !editFormData.lastVisited && (
+                            <Text style={styles.editFormHelperText}>
+                              Required when status is not &quot;Not
+                              Visited&quot;
+                            </Text>
+                          )}
+                        <DateTimePickerModal
+                          isVisible={showDatePicker}
+                          mode="date"
+                          date={
+                            editFormData.lastVisited
+                              ? new Date(editFormData.lastVisited)
+                              : new Date()
+                          }
+                          maximumDate={new Date()}
+                          onConfirm={(selectedDate) => {
+                            const formattedDate = selectedDate
+                              .toISOString()
+                              .split("T")[0];
+                            handleFormChange("lastVisited", formattedDate);
+                            setShowDatePicker(false);
+                          }}
+                          onCancel={() => {
+                            setShowDatePicker(false);
+                          }}
+                        />
+                      </View>
+
+                      {/* Notes */}
+                      <View style={styles.editFormField}>
+                        <Text style={styles.editFormLabel}>Notes</Text>
+                        <TextInput
+                          style={[
+                            styles.editFormInputStandalone,
+                            styles.editFormTextArea,
+                          ]}
+                          value={editFormData.notes}
+                          onChangeText={(value) =>
+                            handleFormChange("notes", value)
+                          }
+                          placeholder="Enter agent notes about the visit/interaction..."
+                          multiline
+                          numberOfLines={3}
+                          textAlignVertical="top"
+                        />
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Contact Information Section */}
+                  <View
+                    style={[
+                      styles.editFormSection,
+                      styles.editFormSectionPurple,
+                    ]}
+                  >
+                    <View style={styles.editFormSectionHeader}>
+                      <View
+                        style={[
+                          styles.editFormSectionHeaderBar,
+                          styles.editFormSectionHeaderBarPurple,
+                        ]}
+                      />
+                      <Text style={styles.editFormSectionTitle}>
+                        Contact Information
+                      </Text>
+                    </View>
+
+                    <View style={styles.editFormFields}>
+                      <View style={styles.editFormField}>
+                        <Text style={styles.editFormLabel}>Phone</Text>
+                        <TextInput
+                          style={styles.editFormInputStandalone}
+                          value={editFormData.phone}
+                          onChangeText={(value) =>
+                            handleFormChange("phone", value)
+                          }
+                          placeholder="Enter phone number"
+                          keyboardType="phone-pad"
+                        />
+                      </View>
+                      <View style={styles.editFormField}>
+                        <Text style={styles.editFormLabel}>Email</Text>
+                        <TextInput
+                          style={styles.editFormInputStandalone}
+                          value={editFormData.email}
+                          onChangeText={(value) =>
+                            handleFormChange("email", value)
+                          }
+                          placeholder="Enter email address"
+                          keyboardType="email-address"
+                          autoCapitalize="none"
+                        />
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Owner Information Section */}
+                  <View
+                    style={[
+                      styles.editFormSection,
+                      styles.editFormSectionOrange,
+                    ]}
+                  >
+                    <View style={styles.editFormSectionHeader}>
+                      <View
+                        style={[
+                          styles.editFormSectionHeaderBar,
+                          styles.editFormSectionHeaderBarOrange,
+                        ]}
+                      />
+                      <Text style={styles.editFormSectionTitle}>
+                        Owner Information
+                      </Text>
+                    </View>
+
+                    <View style={styles.editFormFields}>
+                      <View style={styles.editFormField}>
+                        <Text style={styles.editFormLabel}>Owner Name</Text>
+                        <TextInput
+                          style={styles.editFormInputStandalone}
+                          value={editFormData.ownerName}
+                          onChangeText={(value) =>
+                            handleFormChange("ownerName", value)
+                          }
+                          placeholder="Enter owner name"
+                        />
+                      </View>
+                      <View style={styles.editFormField}>
+                        <Text style={styles.editFormLabel}>Owner Phone</Text>
+                        <TextInput
+                          style={styles.editFormInputStandalone}
+                          value={editFormData.ownerPhone}
+                          onChangeText={(value) =>
+                            handleFormChange("ownerPhone", value)
+                          }
+                          placeholder="Enter owner phone"
+                          keyboardType="phone-pad"
+                        />
+                      </View>
+                      <View style={styles.editFormField}>
+                        <Text style={styles.editFormLabel}>Owner Email</Text>
+                        <TextInput
+                          style={styles.editFormInputStandalone}
+                          value={editFormData.ownerEmail}
+                          onChangeText={(value) =>
+                            handleFormChange("ownerEmail", value)
+                          }
+                          placeholder="Enter owner email"
+                          keyboardType="email-address"
+                          autoCapitalize="none"
+                        />
+                      </View>
+                      <View style={styles.editFormField}>
+                        <Text style={styles.editFormLabel}>
+                          Owner Mailing Address
+                        </Text>
+                        <TextInput
+                          style={styles.editFormInputStandalone}
+                          value={editFormData.ownerMailingAddress}
+                          onChangeText={(value) =>
+                            handleFormChange("ownerMailingAddress", value)
+                          }
+                          placeholder="Enter owner mailing address"
+                        />
+                      </View>
+                    </View>
+                  </View>
+                </ScrollView>
+              </View>
+            )}
+
+            {/* Footer */}
+            <View style={styles.editModalFooter}>
+              <TouchableOpacity
+                style={styles.editModalCancelButton}
+                onPress={handleCloseEditModal}
+                disabled={isUpdatingResident}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.editModalCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.editModalSaveButton,
+                  (!isEditFormValid() || isUpdatingResident) &&
+                    styles.editModalSaveButtonDisabled,
+                ]}
+                onPress={handleUpdateResident}
+                disabled={isUpdatingResident || !isEditFormValid()}
+                activeOpacity={0.7}
+              >
+                {isUpdatingResident && (
+                  <ActivityIndicator
+                    size="small"
+                    color={COLORS.white}
+                    style={{ marginRight: responsiveSpacing(SPACING.xs) }}
+                  />
+                )}
+                <Text style={styles.editModalSaveButtonText}>
+                  {isUpdatingResident
+                    ? "Saving..."
+                    : isEditValidating
+                    ? "Validating..."
+                    : "Save Changes"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Edit Status Dropdown Modal */}
+      <Modal
+        visible={editStatusDropdownVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setEditStatusDropdownVisible(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setEditStatusDropdownVisible(false)}
+        >
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Status</Text>
+              <TouchableOpacity
+                onPress={() => setEditStatusDropdownVisible(false)}
+                style={styles.modalCloseButton}
+              >
+                <Ionicons
+                  name="close"
+                  size={responsiveScale(24)}
+                  color={COLORS.text.primary}
+                />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.modalOptions}>
+              {(
+                [
+                  "not-visited",
+                  "interested",
+                  "visited",
+                  "callback",
+                  "appointment",
+                  "follow-up",
+                  "not-interested",
+                ] as Property["status"][]
+              ).map((status) => (
+                <Pressable
+                  key={status}
+                  style={[
+                    styles.modalOption,
+                    editFormData.status === status && styles.modalOptionActive,
+                  ]}
+                  onPress={() => {
+                    handleFormChange("status", status);
+                    setEditStatusDropdownVisible(false);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.modalOptionText,
+                      ...(editFormData.status === status
+                        ? [styles.modalOptionTextActive]
+                        : []),
+                    ]}
+                  >
+                    {getStatusDisplayName(status)}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Add Property Modal */}
+      <AddPropertyModal
+        ref={addPropertyModalRef}
+        isOpen={isAddModalOpen}
+        onClose={handleCloseAddModal}
+        territoryId={territoryId}
+        onSuccess={handleAddPropertySuccess}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: COLORS.background.secondary,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    gap: responsiveSpacing(SPACING.md),
+  },
+  loadingText: {
+    fontSize: responsiveScale(14),
+    color: COLORS.text.secondary,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: responsiveSpacing(PADDING.screenLarge),
+    gap: responsiveSpacing(SPACING.sm),
+  },
+  errorText: {
+    fontSize: responsiveScale(16),
+    color: COLORS.error[500],
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  errorSubtext: {
+    textAlign: "center",
+  },
+  statusLegendContainer: {
+    backgroundColor: COLORS.background.light,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border.light,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border.light,
+    paddingVertical: responsiveSpacing(SPACING.sm),
+  },
+  statusLegendContent: {
+    paddingHorizontal: responsiveSpacing(SPACING.md),
+    gap: responsiveSpacing(SPACING.md),
+    alignItems: "center",
+  },
+  statusLegendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: responsiveSpacing(SPACING.xs),
+    paddingHorizontal: responsiveSpacing(SPACING.sm),
+    paddingVertical: responsiveSpacing(SPACING.xs / 2),
+  },
+  statusLegendDot: {
+    width: responsiveScale(10),
+    height: responsiveScale(10),
+    borderRadius: responsiveScale(5),
+    flexShrink: 0,
+  },
+  statusLegendText: {
+    fontSize: responsiveScale(12),
+    color: COLORS.text.secondary,
+    fontWeight: "500",
+  },
+  statusLegendCount: {
+    fontSize: responsiveScale(12),
+    color: COLORS.text.light,
+    fontWeight: "400",
+  },
+  addPropertyButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: responsiveSpacing(SPACING.xs),
+    paddingHorizontal: responsiveSpacing(SPACING.md),
+    paddingVertical: responsiveSpacing(SPACING.xs),
+    backgroundColor: COLORS.primary[50],
+    borderRadius: responsiveScale(16),
+    borderWidth: 1,
+    borderColor: COLORS.primary[300],
+    marginRight: responsiveSpacing(SPACING.sm),
+  },
+  addPropertyButtonText: {
+    fontSize: responsiveScale(12),
+    color: COLORS.primary[600],
+    fontWeight: "600",
+  },
+  mapContainer: {
+    // Do NOT use overflow: "hidden" - it causes render clipping on Android with MapView
+    flex: 1,
+    backgroundColor: COLORS.background.secondary,
+  },
+  map: {
+    flex: 1,
+    width: "100%",
+    height: "100%",
+  },
+  mapPlaceholder: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: COLORS.white,
+    gap: responsiveSpacing(SPACING.md),
+  },
+  placeholderText: {
+    fontSize: responsiveScale(14),
+    color: COLORS.text.secondary,
+  },
+  propertyInfoCard: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: responsiveScale(20),
+    borderTopRightRadius: responsiveScale(20),
+    padding: responsiveSpacing(SPACING.md),
+    shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 8,
+    maxHeight: "40%",
+  },
+  propertyInfoHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: responsiveSpacing(SPACING.sm),
+  },
+  propertyInfoContent: {
+    flex: 1,
+    marginRight: responsiveSpacing(SPACING.sm),
+  },
+  propertyInfoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: responsiveSpacing(SPACING.sm),
+    marginBottom: responsiveSpacing(SPACING.xs / 2),
+  },
+  propertyStatusDot: {
+    width: responsiveScale(12),
+    height: responsiveScale(12),
+    borderRadius: responsiveScale(6),
+  },
+  propertyAddress: {
+    fontSize: responsiveScale(16),
+    fontWeight: "600",
+    color: COLORS.text.primary,
+    flex: 1,
+  },
+  propertyDetails: {
+    fontSize: responsiveScale(12),
+    marginLeft: responsiveScale(24), // Align with address text
+  },
+  closeButton: {
+    width: responsiveScale(32),
+    height: responsiveScale(32),
+    borderRadius: responsiveScale(16),
+    backgroundColor: COLORS.neutral[100],
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  closeButtonText: {
+    fontSize: responsiveScale(18),
+    color: COLORS.text.secondary,
+    fontWeight: "600",
+  },
+  bottomSheetBackground: {
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: responsiveScale(20),
+    borderTopRightRadius: responsiveScale(20),
+  },
+  bottomSheetHeaderContainer: {
+    flexShrink: 0,
+    backgroundColor: COLORS.white,
+    paddingBottom: 0,
+    width: "100%",
+  },
+  dragHandle: {
+    width: "100%",
+    alignItems: "center",
+    paddingVertical: responsiveSpacing(SPACING.sm),
+    paddingTop: responsiveSpacing(SPACING.xs),
+  },
+  dragHandleBar: {
+    width: responsiveScale(40),
+    height: responsiveScale(4),
+    backgroundColor: COLORS.neutral[300],
+    borderRadius: responsiveScale(2),
+  },
+  listHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: responsiveSpacing(PADDING.screen),
+    paddingBottom: responsiveSpacing(SPACING.sm),
+    paddingTop: responsiveSpacing(SPACING.xs),
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border.light,
+    backgroundColor: COLORS.white,
+    width: "100%",
+  },
+  listHeaderContent: {
+    flex: 1,
+  },
+  listHeaderTitle: {
+    fontSize: responsiveScale(18),
+    fontWeight: "600",
+    color: COLORS.text.primary,
+    marginBottom: responsiveSpacing(SPACING.xs / 2),
+  },
+  listHeaderCount: {
+    fontSize: responsiveScale(14),
+    color: COLORS.text.secondary,
+  },
+  closeListButton: {
+    width: responsiveScale(32),
+    height: responsiveScale(32),
+    borderRadius: responsiveScale(16),
+    backgroundColor: COLORS.neutral[100],
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  closeListButtonText: {
+    fontSize: responsiveScale(18),
+    color: COLORS.text.secondary,
+    fontWeight: "600",
+  },
+  propertyListScroll: {
+    flex: 1,
+    backgroundColor: COLORS.white,
+  },
+  propertyListContent: {
+    padding: responsiveSpacing(PADDING.screen),
+    paddingTop: responsiveSpacing(SPACING.sm),
+    backgroundColor: COLORS.white,
+  },
+  propertyCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: responsiveScale(12),
+    marginBottom: responsiveSpacing(SPACING.sm),
+    borderWidth: 1,
+    borderColor: COLORS.border.light,
+    overflow: "hidden",
+  },
+  propertyCardHighlighted: {
+    borderColor: COLORS.primary[500],
+    borderWidth: 2,
+    backgroundColor: COLORS.primary[50],
+  },
+  propertyCardContent: {
+    padding: responsiveSpacing(SPACING.md),
+  },
+  propertyCardHeader: {
+    marginBottom: responsiveSpacing(SPACING.xs),
+  },
+  propertyCardTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: responsiveSpacing(SPACING.sm),
+  },
+  propertyCardAddressRow: {
+    flexDirection: "row",
+    flex: 1,
+    alignItems: "flex-start",
+    gap: responsiveSpacing(SPACING.xs),
+    flexWrap: "wrap",
+  },
+  propertyCardAddress: {
+    fontSize: responsiveScale(14),
+    fontWeight: "600",
+    color: COLORS.text.primary,
+    flex: 1,
+    minWidth: 0, // Allow text to shrink
+  },
+  propertyCardShortAddress: {
+    fontSize: responsiveScale(12),
+    color: COLORS.text.secondary,
+  },
+  dataSourceBadge: {
+    paddingHorizontal: responsiveSpacing(SPACING.xs),
+    paddingVertical: responsiveSpacing(SPACING.xs / 2),
+    borderRadius: responsiveScale(4),
+    borderWidth: 1,
+    alignSelf: "flex-start",
+    flexShrink: 0,
+  },
+  dataSourceBadgeManual: {
+    backgroundColor: COLORS.warning[50],
+    borderColor: COLORS.warning[300],
+  },
+  dataSourceBadgeAuto: {
+    backgroundColor: COLORS.neutral[100],
+    borderColor: COLORS.neutral[300],
+  },
+  dataSourceBadgeText: {
+    fontSize: responsiveScale(10),
+    fontWeight: "600",
+  },
+  dataSourceBadgeTextManual: {
+    color: COLORS.warning[700],
+  },
+  dataSourceBadgeTextAuto: {
+    color: COLORS.text.secondary,
+  },
+  propertyCardFooter: {
+    marginTop: responsiveSpacing(SPACING.xs / 2),
+  },
+  statusBadge: {
+    paddingHorizontal: responsiveSpacing(SPACING.xs / 2),
+    paddingTop: responsiveSpacing(SPACING.xs / 8),
+    paddingBottom: responsiveSpacing(SPACING.xs / 8),
+    borderRadius: responsiveScale(3),
+    flexShrink: 0,
+  },
+  statusBadgeText: {
+    fontSize: responsiveScale(9),
+    fontWeight: "500",
+    lineHeight: responsiveScale(11),
+  },
+  propertyCardRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: responsiveSpacing(SPACING.xs),
+  },
+  editButton: {
+    padding: responsiveSpacing(SPACING.xs / 2),
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  statsContainer: {
+    flexDirection: "row",
+    gap: responsiveSpacing(SPACING.xs),
+    paddingHorizontal: responsiveSpacing(PADDING.screen),
+    paddingBottom: responsiveSpacing(SPACING.md),
+    paddingTop: responsiveSpacing(SPACING.sm),
+  },
+  statCard: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: responsiveSpacing(SPACING.sm),
+    paddingHorizontal: responsiveSpacing(SPACING.xs),
+    borderRadius: responsiveScale(12),
+    minHeight: responsiveScale(80),
+    gap: responsiveSpacing(SPACING.xs / 2),
+  },
+  statCardValue: {
+    fontSize: responsiveScale(18),
+    fontWeight: "700",
+    color: COLORS.white,
+    textAlign: "center",
+  },
+  statCardLabel: {
+    fontSize: responsiveScale(11),
+    color: COLORS.white,
+    textAlign: "center",
+    opacity: 0.95,
+  },
+  filtersContainer: {
+    flexShrink: 0,
+    backgroundColor: COLORS.white,
+    paddingHorizontal: responsiveSpacing(PADDING.screen),
+    paddingTop: responsiveSpacing(SPACING.sm),
+    paddingBottom: responsiveSpacing(SPACING.sm),
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border.light,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border.light,
+  },
+  searchContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: COLORS.neutral[50],
+    borderRadius: responsiveScale(8),
+    paddingHorizontal: responsiveSpacing(SPACING.sm),
+    paddingVertical: responsiveSpacing(SPACING.xs),
+    marginBottom: responsiveSpacing(SPACING.sm),
+    borderWidth: 1,
+    borderColor: COLORS.border.light,
+  },
+  searchIcon: {
+    marginRight: responsiveSpacing(SPACING.xs),
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: responsiveScale(14),
+    color: COLORS.text.primary,
+    paddingVertical: responsiveSpacing(SPACING.xs / 2),
+  },
+  clearSearchButton: {
+    padding: responsiveSpacing(SPACING.xs / 2),
+  },
+  sortButtonsContainer: {
+    flexDirection: "row",
+    gap: responsiveSpacing(SPACING.xs),
+    marginBottom: responsiveSpacing(SPACING.sm),
+  },
+  sortButton: {
+    flex: 1,
+    paddingVertical: responsiveSpacing(SPACING.xs),
+    paddingHorizontal: responsiveSpacing(SPACING.sm),
+    borderRadius: responsiveScale(6),
+    borderWidth: 1,
+    borderColor: COLORS.border.light,
+    backgroundColor: COLORS.white,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sortButtonActive: {
+    backgroundColor: COLORS.primary[500],
+    borderColor: COLORS.primary[500],
+  },
+  sortButtonText: {
+    fontSize: responsiveScale(12),
+    fontWeight: "500",
+    color: COLORS.text.primary,
+  },
+  sortButtonTextActive: {
+    color: COLORS.white,
+    fontWeight: "600",
+  },
+  filterDropdownsContainer: {
+    flexDirection: "row",
+    gap: responsiveSpacing(SPACING.xs),
+  },
+  filterDropdownWrapper: {
+    flex: 1,
+  },
+  filterDropdown: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: COLORS.neutral[50],
+    borderRadius: responsiveScale(8),
+    paddingHorizontal: responsiveSpacing(SPACING.sm),
+    paddingVertical: responsiveSpacing(SPACING.sm),
+    borderWidth: 1,
+    borderColor: COLORS.border.light,
+  },
+  filterDropdownText: {
+    fontSize: responsiveScale(12),
+    color: COLORS.text.primary,
+    flex: 1,
+  },
+  emptyStateContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingVertical: responsiveSpacing(SPACING.xl * 2),
+    gap: responsiveSpacing(SPACING.sm),
+  },
+  emptyStateText: {
+    fontSize: responsiveScale(16),
+    fontWeight: "600",
+    color: COLORS.text.primary,
+  },
+  emptyStateSubtext: {
+    textAlign: "center",
+    fontSize: responsiveScale(12),
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: responsiveSpacing(PADDING.screen),
+  },
+  modalContent: {
+    backgroundColor: COLORS.white,
+    borderRadius: responsiveScale(16),
+    width: "100%",
+    maxWidth: responsiveScale(400),
+    maxHeight: "80%",
+    overflow: "hidden",
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: responsiveSpacing(PADDING.screen),
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border.light,
+  },
+  modalTitle: {
+    fontSize: responsiveScale(18),
+    fontWeight: "600",
+    color: COLORS.text.primary,
+  },
+  modalCloseButton: {
+    padding: responsiveSpacing(SPACING.xs / 2),
+  },
+  modalOptions: {
+    maxHeight: responsiveScale(400),
+  },
+  modalOption: {
+    padding: responsiveSpacing(SPACING.md),
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border.light,
+  },
+  modalOptionActive: {
+    backgroundColor: COLORS.primary[50],
+  },
+  modalOptionText: {
+    fontSize: responsiveScale(14),
+    color: COLORS.text.primary,
+  },
+  modalOptionTextActive: {
+    color: COLORS.primary[500],
+    fontWeight: "600",
+  },
+  propertyModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  propertyModalContent: {
+    backgroundColor: COLORS.white,
+    borderRadius: responsiveScale(20),
+    width: "90%",
+    maxWidth: responsiveScale(600),
+    maxHeight: "90%",
+    flexDirection: "column",
+    shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 8,
+    alignSelf: "center",
+  },
+  propertyModalHeaderButtons: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: responsiveSpacing(SPACING.sm),
+  },
+  propertyModalEditButton: {
+    padding: responsiveSpacing(SPACING.xs),
+  },
+  propertyModalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: responsiveSpacing(PADDING.screen),
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border.light,
+    flexShrink: 0,
+  },
+  propertyModalTitle: {
+    fontSize: responsiveScale(20),
+    fontWeight: "600",
+    color: COLORS.text.primary,
+  },
+  propertyModalCloseButton: {
+    padding: responsiveSpacing(SPACING.xs / 2),
+  },
+  propertyModalScroll: {
+    flexShrink: 1,
+  },
+  propertyModalScrollContent: {
+    padding: responsiveSpacing(PADDING.screen),
+    paddingBottom: responsiveSpacing(SPACING.xl),
+  },
+  propertyModalLoading: {
+    minHeight: responsiveScale(300),
+    justifyContent: "center",
+    alignItems: "center",
+    paddingVertical: responsiveSpacing(SPACING.xl * 2),
+    gap: responsiveSpacing(SPACING.md),
+  },
+  propertyModalLoadingText: {
+    fontSize: responsiveScale(14),
+    color: COLORS.text.secondary,
+  },
+  propertyModalError: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingVertical: responsiveSpacing(SPACING.xl * 2),
+    gap: responsiveSpacing(SPACING.md),
+  },
+  propertyModalErrorText: {
+    fontSize: responsiveScale(14),
+    color: COLORS.error[500],
+    textAlign: "center",
+  },
+  propertyModalErrorButton: {
+    paddingHorizontal: responsiveSpacing(SPACING.md),
+    paddingVertical: responsiveSpacing(SPACING.sm),
+    borderRadius: responsiveScale(8),
+    borderWidth: 1,
+    borderColor: COLORS.border.light,
+    backgroundColor: COLORS.white,
+  },
+  propertyModalErrorButtonText: {
+    fontSize: responsiveScale(14),
+    color: COLORS.text.primary,
+    fontWeight: "500",
+  },
+  propertyDetailHeader: {
+    padding: responsiveSpacing(PADDING.screen),
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border.light,
+  },
+  propertyDetailHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: responsiveSpacing(SPACING.md),
+    marginBottom: responsiveSpacing(SPACING.md),
+  },
+  propertyDetailIcon: {
+    width: responsiveScale(48),
+    height: responsiveScale(48),
+    borderRadius: responsiveScale(24),
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  propertyDetailHeaderContent: {
+    flex: 1,
+  },
+  propertyDetailAddress: {
+    fontSize: responsiveScale(18),
+    fontWeight: "600",
+    color: COLORS.text.primary,
+    marginBottom: responsiveSpacing(SPACING.xs),
+  },
+  propertyDetailStatusBadge: {
+    marginTop: responsiveSpacing(SPACING.xs / 2),
+  },
+  propertyDetailStatusBadgeInner: {
+    paddingHorizontal: responsiveSpacing(SPACING.sm),
+    paddingVertical: responsiveSpacing(SPACING.xs / 2),
+    borderRadius: responsiveScale(6),
+    alignSelf: "flex-start",
+  },
+  propertyDetailStatusText: {
+    fontSize: responsiveScale(12),
+    fontWeight: "600",
+  },
+  propertyDetailStatsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: responsiveSpacing(SPACING.md),
+  },
+  propertyDetailStat: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: responsiveSpacing(SPACING.xs / 2),
+  },
+  propertyDetailStatText: {
+    fontSize: responsiveScale(12),
+    color: COLORS.text.secondary,
+  },
+  propertyDetailContentCard: {
+    backgroundColor: COLORS.neutral[50],
+    borderRadius: responsiveScale(12),
+    padding: responsiveSpacing(SPACING.md),
+    marginTop: responsiveSpacing(SPACING.md),
+  },
+  propertyDetailSectionTitle: {
+    fontSize: responsiveScale(18),
+    fontWeight: "600",
+    color: COLORS.text.primary,
+    marginBottom: responsiveSpacing(SPACING.md),
+  },
+  propertyDetailContactRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: responsiveSpacing(SPACING.sm),
+    marginBottom: responsiveSpacing(SPACING.md),
+  },
+  propertyDetailContactText: {
+    fontSize: responsiveScale(14),
+    color: COLORS.primary[500],
+    fontWeight: "500",
+  },
+  propertyDetailTagsContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: responsiveSpacing(SPACING.xs),
+    marginTop: responsiveSpacing(SPACING.sm),
+  },
+  propertyDetailTag: {
+    paddingHorizontal: responsiveSpacing(SPACING.sm),
+    paddingVertical: responsiveSpacing(SPACING.xs / 2),
+    borderRadius: responsiveScale(6),
+    backgroundColor: COLORS.neutral[200],
+  },
+  propertyDetailTagText: {
+    fontSize: responsiveScale(11),
+    color: COLORS.text.secondary,
+  },
+  propertyDetailZoneInfo: {
+    marginTop: responsiveSpacing(SPACING.md),
+    paddingTop: responsiveSpacing(SPACING.md),
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border.light,
+  },
+  propertyDetailZoneText: {
+    fontSize: responsiveScale(12),
+    color: COLORS.text.secondary,
+    marginBottom: responsiveSpacing(SPACING.xs / 2),
+  },
+  propertyDetailZoneLabel: {
+    fontWeight: "600",
+    color: COLORS.text.primary,
+  },
+  propertyDetailExportContainer: {
+    marginTop: responsiveSpacing(SPACING.md),
+    alignItems: "flex-end",
+  },
+  propertyDetailExportButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: responsiveSpacing(SPACING.xs),
+    backgroundColor: COLORS.success[600] || "#10B981",
+    paddingHorizontal: responsiveSpacing(SPACING.md),
+    paddingVertical: responsiveSpacing(SPACING.sm),
+    borderRadius: responsiveScale(8),
+  },
+  propertyDetailExportButtonText: {
+    fontSize: responsiveScale(14),
+    fontWeight: "600",
+    color: COLORS.white,
+  },
+  // Edit Modal Styles
+  editModalContent: {
+    backgroundColor: COLORS.white,
+    borderRadius: responsiveScale(20),
+    height: Dimensions.get("window").height * 0.85,
+    width: "95%",
+    alignSelf: "center",
+    marginTop: responsiveSpacing(SPACING.lg),
+    marginBottom: responsiveSpacing(SPACING.lg),
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+    flexDirection: "column",
+    overflow: "hidden",
+  },
+  editModalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: responsiveSpacing(PADDING.screen),
+    paddingVertical: responsiveSpacing(SPACING.md),
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border.light,
+    flexShrink: 0,
+  },
+  editModalTitle: {
+    fontSize: responsiveScale(20),
+    fontWeight: "600",
+    color: COLORS.text.primary,
+  },
+  editModalLoading: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingVertical: responsiveSpacing(SPACING.xl * 2),
+    minHeight: Dimensions.get("window").height * 0.4,
+  },
+  editModalLoadingText: {
+    marginTop: responsiveSpacing(SPACING.md),
+    fontSize: responsiveScale(14),
+    color: COLORS.text.secondary,
+  },
+  editModalScrollWrapper: {
+    flex: 1,
+    minHeight: 0,
+  },
+  editModalScroll: {
+    flex: 1,
+  },
+  editModalScrollContent: {
+    padding: responsiveSpacing(PADDING.screen),
+    paddingBottom: responsiveSpacing(SPACING.xl),
+  },
+  editModalFooter: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: responsiveSpacing(SPACING.sm),
+    paddingHorizontal: responsiveSpacing(PADDING.screen),
+    paddingVertical: responsiveSpacing(SPACING.md),
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border.light,
+    flexShrink: 0,
+  },
+  editModalCancelButton: {
+    paddingVertical: responsiveSpacing(SPACING.sm),
+    paddingHorizontal: responsiveSpacing(SPACING.md),
+    borderRadius: responsiveScale(8),
+    backgroundColor: COLORS.neutral[100],
+  },
+  editModalCancelButtonText: {
+    fontSize: responsiveScale(14),
+    fontWeight: "500",
+    color: COLORS.text.secondary,
+  },
+  editModalSaveButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: responsiveSpacing(SPACING.sm),
+    paddingHorizontal: responsiveSpacing(SPACING.md),
+    borderRadius: responsiveScale(8),
+    backgroundColor: COLORS.primary[500],
+  },
+  editModalSaveButtonDisabled: {
+    backgroundColor: COLORS.neutral[300],
+    opacity: 0.5,
+  },
+  editModalSaveButtonText: {
+    fontSize: responsiveScale(14),
+    fontWeight: "600",
+    color: COLORS.white,
+  },
+  // Edit Form Section Styles
+  editFormSection: {
+    backgroundColor: COLORS.primary[50],
+    borderRadius: responsiveScale(12),
+    padding: responsiveSpacing(SPACING.md),
+    marginBottom: responsiveSpacing(SPACING.md),
+    borderWidth: 1,
+    borderColor: COLORS.primary[100],
+  },
+  editFormSectionGreen: {
+    backgroundColor: COLORS.success[50],
+    borderColor: COLORS.success[100],
+  },
+  editFormSectionPurple: {
+    backgroundColor: "#F3E8FF",
+    borderColor: "#E9D5FF",
+  },
+  editFormSectionOrange: {
+    backgroundColor: "#FFF7ED",
+    borderColor: "#FED7AA",
+  },
+  editFormSectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: responsiveSpacing(SPACING.xs),
+    marginBottom: responsiveSpacing(SPACING.md),
+  },
+  editFormSectionHeaderBar: {
+    width: responsiveScale(4),
+    height: responsiveScale(24),
+    backgroundColor: COLORS.primary[500],
+    borderRadius: responsiveScale(2),
+  },
+  editFormSectionHeaderBarGreen: {
+    backgroundColor: COLORS.success[500],
+  },
+  editFormSectionHeaderBarPurple: {
+    backgroundColor: "#A855F7",
+  },
+  editFormSectionHeaderBarOrange: {
+    backgroundColor: "#F97316",
+  },
+  editFormSectionTitle: {
+    fontSize: responsiveScale(16),
+    fontWeight: "600",
+    color: COLORS.text.primary,
+  },
+  editFormFields: {
+    gap: responsiveSpacing(SPACING.md),
+  },
+  editFormRow: {
+    flexDirection: "row",
+    gap: responsiveSpacing(SPACING.sm),
+  },
+  editFormField: {
+    marginBottom: responsiveSpacing(SPACING.sm),
+  },
+  editFormLabel: {
+    fontSize: responsiveScale(14),
+    fontWeight: "500",
+    color: COLORS.text.primary,
+    marginBottom: responsiveSpacing(SPACING.xs),
+  },
+  editFormRequired: {
+    color: COLORS.error[500],
+  },
+  editFormInputContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: COLORS.white,
+    borderRadius: responsiveScale(8),
+    borderWidth: 1,
+    borderColor: COLORS.border.light,
+    paddingHorizontal: responsiveSpacing(SPACING.sm),
+  },
+  editFormInput: {
+    flex: 1,
+    fontSize: responsiveScale(14),
+    color: COLORS.text.primary,
+    paddingVertical: responsiveSpacing(SPACING.sm),
+    paddingLeft: responsiveSpacing(SPACING.sm),
+    minHeight: responsiveScale(44),
+    backgroundColor: "transparent",
+    borderWidth: 0,
+  },
+  editFormInputStandalone: {
+    flex: 1,
+    fontSize: responsiveScale(14),
+    color: COLORS.text.primary,
+    paddingVertical: responsiveSpacing(SPACING.sm),
+    paddingHorizontal: responsiveSpacing(SPACING.sm),
+    paddingLeft: responsiveSpacing(SPACING.md),
+    minHeight: responsiveScale(44),
+    backgroundColor: COLORS.white,
+    borderRadius: responsiveScale(8),
+    borderWidth: 1,
+    borderColor: COLORS.border.light,
+  },
+  editFormTextArea: {
+    minHeight: responsiveScale(80),
+    paddingTop: responsiveSpacing(SPACING.sm),
+  },
+  editFormSearchButton: {
+    padding: responsiveSpacing(SPACING.xs),
+  },
+  addressSuggestionsContainer: {
+    position: "absolute",
+    top: "100%",
+    left: 0,
+    right: 0,
+    marginTop: responsiveSpacing(SPACING.xs),
+    backgroundColor: COLORS.white,
+    borderRadius: responsiveScale(8),
+    borderWidth: 1,
+    borderColor: COLORS.border.light,
+    maxHeight: Dimensions.get("window").height * 0.3,
+    zIndex: 1000,
+    elevation: 5,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  addressSuggestionsList: {
+    maxHeight: Dimensions.get("window").height * 0.3,
+  },
+  addressSuggestionItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: responsiveSpacing(SPACING.md),
+    paddingVertical: responsiveSpacing(SPACING.sm),
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border.light,
+  },
+  addressSuggestionText: {
+    flex: 1,
+    fontSize: responsiveScale(14),
+    color: COLORS.text.primary,
+  },
+  editFormDatePickerButton: {
+    padding: responsiveSpacing(SPACING.xs),
+  },
+  editFormSelect: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: COLORS.white,
+    borderRadius: responsiveScale(8),
+    borderWidth: 1,
+    borderColor: COLORS.border.light,
+    paddingHorizontal: responsiveSpacing(SPACING.sm),
+    paddingVertical: responsiveSpacing(SPACING.sm),
+    minHeight: responsiveScale(44),
+  },
+  editFormSelectText: {
+    fontSize: responsiveScale(14),
+    color: COLORS.text.primary,
+  },
+  editFormLocationButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: responsiveSpacing(SPACING.xs),
+    backgroundColor: COLORS.white,
+    borderRadius: responsiveScale(8),
+    borderWidth: 1,
+    borderColor: COLORS.primary[300],
+    paddingVertical: responsiveSpacing(SPACING.sm),
+    minHeight: responsiveScale(44),
+  },
+  editFormLocationButtonText: {
+    fontSize: responsiveScale(14),
+    fontWeight: "500",
+    color: COLORS.primary[500],
+  },
+  editFormHelperText: {
+    fontSize: responsiveScale(11),
+    color: COLORS.text.secondary,
+    marginTop: responsiveSpacing(SPACING.xs / 2),
+  },
+  editFormErrorContainer: {
+    backgroundColor: COLORS.error[50],
+    borderRadius: responsiveScale(8),
+    padding: responsiveSpacing(SPACING.md),
+    marginBottom: responsiveSpacing(SPACING.md),
+    borderWidth: 1,
+    borderColor: COLORS.error[200],
+  },
+  editFormErrorTitle: {
+    fontSize: responsiveScale(14),
+    fontWeight: "600",
+    color: COLORS.error[800],
+    marginBottom: responsiveSpacing(SPACING.xs),
+  },
+  editFormErrorText: {
+    fontSize: responsiveScale(12),
+    color: COLORS.error[700],
+    marginBottom: responsiveSpacing(SPACING.xs / 2),
+  },
+  editFormValidatingContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: responsiveSpacing(SPACING.sm),
+    backgroundColor: COLORS.primary[50],
+    borderRadius: responsiveScale(8),
+    padding: responsiveSpacing(SPACING.md),
+    marginBottom: responsiveSpacing(SPACING.md),
+    borderWidth: 1,
+    borderColor: COLORS.primary[200],
+  },
+  editFormValidating: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: responsiveSpacing(SPACING.sm),
+    backgroundColor: COLORS.primary[50],
+    borderRadius: responsiveScale(8),
+    padding: responsiveSpacing(SPACING.md),
+    marginBottom: responsiveSpacing(SPACING.md),
+    borderWidth: 1,
+    borderColor: COLORS.primary[200],
+  },
+  editFormValidatingText: {
+    fontSize: responsiveScale(12),
+    color: COLORS.primary[600],
+  },
+  editModalSubtitle: {
+    fontSize: responsiveScale(12),
+    color: COLORS.text.secondary,
+    marginTop: responsiveSpacing(SPACING.xs / 2),
+  },
+  editFormValidationErrors: {
+    backgroundColor: COLORS.error[50],
+    borderRadius: responsiveScale(8),
+    padding: responsiveSpacing(SPACING.md),
+    marginBottom: responsiveSpacing(SPACING.md),
+    borderWidth: 1,
+    borderColor: COLORS.error[200],
+  },
+  editFormValidationErrorsTitle: {
+    fontSize: responsiveScale(14),
+    fontWeight: "600",
+    color: COLORS.error[700],
+    marginBottom: responsiveSpacing(SPACING.xs),
+  },
+  editFormValidationErrorText: {
+    fontSize: responsiveScale(12),
+    color: COLORS.error[700],
+    marginTop: responsiveSpacing(SPACING.xs / 2),
+  },
+});
