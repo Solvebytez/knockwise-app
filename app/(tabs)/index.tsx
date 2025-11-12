@@ -5,9 +5,9 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  StatusBar,
 } from "react-native";
 import { Image } from "expo-image";
+import { StatusBar } from "expo-status-bar";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { useAuthStore } from "@/store/authStore";
@@ -152,7 +152,7 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
+      <StatusBar style="dark" backgroundColor={COLORS.white} />
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
