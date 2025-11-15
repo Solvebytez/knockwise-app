@@ -715,6 +715,8 @@ const AddPropertyModal = React.forwardRef<
                             <ScrollView
                               style={styles.addressSuggestionsList}
                               keyboardShouldPersistTaps="handled"
+                              nestedScrollEnabled={true}
+                              showsVerticalScrollIndicator={true}
                             >
                               {addAddressSuggestions.map((suggestion, index) => (
                                 <TouchableOpacity
@@ -1325,16 +1327,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   addressSuggestionsContainer: {
+    position: "absolute",
+    top: "100%",
+    left: 0,
+    right: 0,
     marginTop: responsiveSpacing(SPACING.xs),
     backgroundColor: COLORS.white,
     borderRadius: responsiveScale(8),
     borderWidth: 1,
     borderColor: COLORS.border.light,
-    maxHeight: responsiveScale(200),
+    maxHeight: Dimensions.get("window").height * 0.3,
     zIndex: 1000,
+    elevation: 5,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   addressSuggestionsList: {
-    maxHeight: responsiveScale(200),
+    maxHeight: Dimensions.get("window").height * 0.3,
   },
   addressSuggestionItem: {
     flexDirection: "row",

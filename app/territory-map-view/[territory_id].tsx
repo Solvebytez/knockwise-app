@@ -18,6 +18,7 @@ import {
   ScrollView,
   Linking,
   Alert,
+  Platform,
 } from "react-native";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -44,6 +45,11 @@ import DateTimePickerModal from "react-native-modal-datetime-picker";
 import AddPropertyModal, {
   AddPropertyModalRef,
 } from "@/components/AddPropertyModal";
+import * as FileSystem from "expo-file-system/legacy";
+import * as XLSX from "xlsx";
+
+// Lazy load expo-sharing to avoid native module errors on startup
+// We'll import it dynamically when needed
 
 interface Territory {
   _id: string;
@@ -195,6 +201,22 @@ export default function TerritoryMapViewScreen() {
 
   // Add property modal state
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+
+  // Export modal state
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [exportScope, setExportScope] = useState<"all" | "filtered">("all");
+  const [exportFormat, setExportFormat] = useState<"csv" | "excel">("csv");
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
+
+  // Property export modal state
+  const [isPropertyExportModalOpen, setIsPropertyExportModalOpen] =
+    useState(false);
+  const [propertyExportFormat, setPropertyExportFormat] = useState<
+    "csv" | "excel"
+  >("csv");
+  const [isPropertyExporting, setIsPropertyExporting] = useState(false);
+  const [propertyExportProgress, setPropertyExportProgress] = useState(0);
 
   // Statistics state (matching web client)
   const [stats, setStats] = useState({
@@ -1086,11 +1108,8 @@ export default function TerritoryMapViewScreen() {
       console.log("✅ Update response:", response.data);
 
       if (response.data.success) {
-        // Show success message (matching web version toast)
-        Alert.alert(
-          "Success",
-          "Resident updated successfully! You can continue editing or close the modal."
-        );
+        // Show success message
+        Alert.alert("Success", "Property updated successfully!");
 
         // Invalidate and refetch property details cache
         queryClient.invalidateQueries({
@@ -1180,8 +1199,8 @@ export default function TerritoryMapViewScreen() {
             : prev
         );
 
-        // Modal stays open - user can continue editing or close manually (matching web)
-        // React Query will automatically refetch detailedProperty when needed
+        // Close modal after successful update
+        handleCloseEditModal();
       }
     } catch (error: any) {
       console.error("Error updating resident:", error);
@@ -1252,6 +1271,676 @@ export default function TerritoryMapViewScreen() {
   const handleAddPropertySuccess = (newProperty: Property) => {
     setProperties((prev) => [...prev, newProperty]);
     setFilteredProperties((prev) => [...prev, newProperty]);
+  };
+
+  // Fetch detailed property data for export
+  const fetchDetailedPropertyData = async (propertyId: string) => {
+    try {
+      const response = await apiInstance.get(`/residents/${propertyId}`);
+      return response.data.data;
+    } catch (error) {
+      console.error(`Error fetching property ${propertyId}:`, error);
+      return null;
+    }
+  };
+
+  // Export properties to CSV
+  const exportToCSV = async (propertiesToExport: Property[]) => {
+    try {
+      setIsExporting(true);
+      setExportProgress(0);
+
+      // Fetch detailed data for all properties
+      const detailedData: any[] = [];
+      const total = propertiesToExport.length;
+
+      for (let i = 0; i < total; i++) {
+        const property = propertiesToExport[i];
+        const detailed = await fetchDetailedPropertyData(property._id);
+
+        if (detailed) {
+          const row: any = {
+            _id: property._id || "",
+            address: property.address || "",
+            houseNumber: property.houseNumber || "",
+            longitude: property.coordinates?.[0] || "",
+            latitude: property.coordinates?.[1] || "",
+            status: property.status || "",
+            lastVisited: property.lastVisited || "",
+            notes: property.notes || "",
+            dataSource: property.dataSource || "",
+            phone: detailed.resident?.phone || "",
+            email: detailed.resident?.email || "",
+            ownerName: detailed.propertyData?.ownerName || "",
+            ownerPhone: detailed.propertyData?.ownerPhone || "",
+            ownerEmail: detailed.propertyData?.ownerEmail || "",
+            ownerMailingAddress:
+              detailed.propertyData?.ownerMailingAddress || "",
+          };
+          detailedData.push(row);
+        }
+
+        setExportProgress(Math.round(((i + 1) / total) * 100));
+      }
+
+      // Generate CSV content
+      const headers = [
+        "_id",
+        "address",
+        "houseNumber",
+        "longitude",
+        "latitude",
+        "status",
+        "lastVisited",
+        "notes",
+        "dataSource",
+        "phone",
+        "email",
+        "ownerName",
+        "ownerPhone",
+        "ownerEmail",
+        "ownerMailingAddress",
+      ];
+
+      const csvRows = [
+        headers.join(","),
+        ...detailedData.map((row) =>
+          headers
+            .map((header) => {
+              const value = row[header] || "";
+              // Escape commas and quotes in CSV
+              if (
+                typeof value === "string" &&
+                (value.includes(",") ||
+                  value.includes('"') ||
+                  value.includes("\n"))
+              ) {
+                return `"${value.replace(/"/g, '""')}"`;
+              }
+              return value;
+            })
+            .join(",")
+        ),
+      ];
+
+      const csvContent = csvRows.join("\n");
+
+      // Save file using legacy FileSystem API
+      const fileName = `properties_export_${
+        new Date().toISOString().split("T")[0]
+      }.csv`;
+      const fileUri = FileSystem.documentDirectory + fileName;
+
+      await FileSystem.writeAsStringAsync(fileUri, csvContent);
+
+      // Auto-save to Downloads folder
+      try {
+        if (Platform.OS === "android") {
+          // For Android: Use Storage Access Framework to save to Downloads
+          const { StorageAccessFramework } = FileSystem;
+          if (StorageAccessFramework) {
+            const permissions =
+              await StorageAccessFramework.requestDirectoryPermissionsAsync();
+            if (permissions.granted) {
+              // Create file in Downloads folder
+              const downloadFileUri =
+                await StorageAccessFramework.createFileAsync(
+                  permissions.directoryUri,
+                  fileName,
+                  "text/csv"
+                );
+              // Read the file content and write to Downloads
+              const fileContent = await FileSystem.readAsStringAsync(fileUri);
+              await FileSystem.writeAsStringAsync(downloadFileUri, fileContent);
+              Alert.alert("Success", `File saved to Downloads: ${fileName}`);
+            } else {
+              // Fallback to sharing if permission denied
+              const SharingModule = await import("expo-sharing").catch(
+                () => null
+              );
+              if (SharingModule && (await SharingModule.isAvailableAsync?.())) {
+                await SharingModule.shareAsync(fileUri, {
+                  mimeType: "text/csv",
+                  dialogTitle: "Save CSV file",
+                });
+              } else {
+                Alert.alert("Success", `File saved to: ${fileUri}`);
+              }
+            }
+          } else {
+            // Fallback to sharing
+            const SharingModule = await import("expo-sharing").catch(
+              () => null
+            );
+            if (SharingModule && (await SharingModule.isAvailableAsync?.())) {
+              await SharingModule.shareAsync(fileUri, {
+                mimeType: "text/csv",
+                dialogTitle: "Save CSV file",
+              });
+            } else {
+              Alert.alert("Success", `File saved to: ${fileUri}`);
+            }
+          }
+        } else {
+          // For iOS: Share with option to save to Files
+          const SharingModule = await import("expo-sharing").catch(() => null);
+          if (SharingModule && (await SharingModule.isAvailableAsync?.())) {
+            await SharingModule.shareAsync(fileUri, {
+              mimeType: "text/csv",
+              dialogTitle: "Save CSV file",
+              UTI: "public.comma-separated-values-text",
+            });
+          } else {
+            Alert.alert("Success", `File saved to: ${fileUri}`);
+          }
+        }
+      } catch (shareError) {
+        console.error("Sharing error:", shareError);
+        Alert.alert("Success", `File saved to: ${fileUri}`);
+      }
+
+      setIsExportModalOpen(false);
+      Alert.alert("Success", "Properties exported successfully!");
+    } catch (error: any) {
+      console.error("Export error:", error);
+      Alert.alert(
+        "Error",
+        `Failed to export: ${error.message || "Unknown error"}`
+      );
+    } finally {
+      setIsExporting(false);
+      setExportProgress(0);
+    }
+  };
+
+  // Export properties to Excel
+  const exportToExcel = async (propertiesToExport: Property[]) => {
+    try {
+      setIsExporting(true);
+      setExportProgress(0);
+
+      // Fetch detailed data for all properties
+      const detailedData: any[] = [];
+      const total = propertiesToExport.length;
+
+      for (let i = 0; i < total; i++) {
+        const property = propertiesToExport[i];
+        const detailed = await fetchDetailedPropertyData(property._id);
+
+        if (detailed) {
+          const row: any = {
+            _id: property._id || "",
+            address: property.address || "",
+            houseNumber: property.houseNumber || "",
+            longitude: property.coordinates?.[0] || "",
+            latitude: property.coordinates?.[1] || "",
+            status: property.status || "",
+            lastVisited: property.lastVisited || "",
+            notes: property.notes || "",
+            dataSource: property.dataSource || "",
+            phone: detailed.resident?.phone || "",
+            email: detailed.resident?.email || "",
+            ownerName: detailed.propertyData?.ownerName || "",
+            ownerPhone: detailed.propertyData?.ownerPhone || "",
+            ownerEmail: detailed.propertyData?.ownerEmail || "",
+            ownerMailingAddress:
+              detailed.propertyData?.ownerMailingAddress || "",
+          };
+          detailedData.push(row);
+        }
+
+        setExportProgress(Math.round(((i + 1) / total) * 100));
+      }
+
+      // Create workbook and worksheet
+      const worksheet = XLSX.utils.json_to_sheet(detailedData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Properties");
+
+      // Generate Excel file as base64 directly
+      const wbout = XLSX.write(workbook, {
+        type: "base64",
+        bookType: "xlsx",
+      });
+
+      // Save file using legacy FileSystem API
+      const fileName = `properties_export_${
+        new Date().toISOString().split("T")[0]
+      }.xlsx`;
+      const fileUri = FileSystem.documentDirectory + fileName;
+
+      // Save the file with base64 encoding
+      await FileSystem.writeAsStringAsync(fileUri, wbout, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      // Auto-save to Downloads folder
+      try {
+        if (Platform.OS === "android") {
+          // For Android: Use Storage Access Framework to save to Downloads
+          const { StorageAccessFramework } = FileSystem;
+          if (StorageAccessFramework) {
+            const permissions =
+              await StorageAccessFramework.requestDirectoryPermissionsAsync();
+            if (permissions.granted) {
+              // Create file in Downloads folder
+              const downloadFileUri =
+                await StorageAccessFramework.createFileAsync(
+                  permissions.directoryUri,
+                  fileName,
+                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                );
+              // Read the file content and write to Downloads
+              const fileContent = await FileSystem.readAsStringAsync(fileUri, {
+                encoding: FileSystem.EncodingType.Base64,
+              });
+              await FileSystem.writeAsStringAsync(
+                downloadFileUri,
+                fileContent,
+                {
+                  encoding: FileSystem.EncodingType.Base64,
+                }
+              );
+              Alert.alert("Success", `File saved to Downloads: ${fileName}`);
+            } else {
+              // Fallback to sharing if permission denied
+              const SharingModule = await import("expo-sharing").catch(
+                () => null
+              );
+              if (SharingModule && (await SharingModule.isAvailableAsync?.())) {
+                await SharingModule.shareAsync(fileUri, {
+                  mimeType:
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                  dialogTitle: "Save Excel file",
+                });
+              } else {
+                Alert.alert("Success", `File saved to: ${fileUri}`);
+              }
+            }
+          } else {
+            // Fallback to sharing
+            const SharingModule = await import("expo-sharing").catch(
+              () => null
+            );
+            if (SharingModule && (await SharingModule.isAvailableAsync?.())) {
+              await SharingModule.shareAsync(fileUri, {
+                mimeType:
+                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                dialogTitle: "Save Excel file",
+              });
+            } else {
+              Alert.alert("Success", `File saved to: ${fileUri}`);
+            }
+          }
+        } else {
+          // For iOS: Share with option to save to Files
+          const SharingModule = await import("expo-sharing").catch(() => null);
+          if (SharingModule && (await SharingModule.isAvailableAsync?.())) {
+            await SharingModule.shareAsync(fileUri, {
+              mimeType:
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              dialogTitle: "Save Excel file",
+              UTI: "org.openxmlformats.spreadsheetml.sheet",
+            });
+          } else {
+            Alert.alert("Success", `File saved to: ${fileUri}`);
+          }
+        }
+      } catch (shareError) {
+        console.error("Sharing error:", shareError);
+        Alert.alert("Success", `File saved to: ${fileUri}`);
+      }
+
+      setIsExportModalOpen(false);
+      Alert.alert("Success", "Properties exported successfully!");
+    } catch (error: any) {
+      console.error("Export error:", error);
+      Alert.alert(
+        "Error",
+        `Failed to export: ${error.message || "Unknown error"}`
+      );
+    } finally {
+      setIsExporting(false);
+      setExportProgress(0);
+    }
+  };
+
+  // Handle export
+  const handleExport = async () => {
+    const propertiesToExport =
+      exportScope === "all" ? properties : filteredProperties;
+
+    if (propertiesToExport.length === 0) {
+      Alert.alert("No Properties", "There are no properties to export.");
+      return;
+    }
+
+    if (exportFormat === "csv") {
+      await exportToCSV(propertiesToExport);
+    } else {
+      await exportToExcel(propertiesToExport);
+    }
+  };
+
+  // Export single property to CSV
+  const exportPropertyToCSV = async (property: Property) => {
+    try {
+      setIsPropertyExporting(true);
+      setPropertyExportProgress(0);
+
+      // Fetch detailed data for this property
+      const detailed = await fetchDetailedPropertyData(property._id);
+
+      if (!detailed) {
+        Alert.alert("Error", "Failed to fetch property details");
+        setIsPropertyExporting(false);
+        return;
+      }
+
+      setPropertyExportProgress(50);
+
+      // Prepare data for export
+      const propertyData = {
+        _id: property._id || "",
+        address: detailed.resident?.address || property.address || "",
+        houseNumber:
+          detailed.resident?.houseNumber || property.houseNumber || "",
+        longitude: property.coordinates?.[0] || "",
+        latitude: property.coordinates?.[1] || "",
+        status: detailed.resident?.status || property.status || "",
+        lastVisited:
+          detailed.resident?.lastVisited || property.lastVisited || "",
+        notes: detailed.resident?.notes || property.notes || "",
+        dataSource: property.dataSource || "",
+        phone: detailed.resident?.phone || "",
+        email: detailed.resident?.email || "",
+        ownerName: detailed.propertyData?.ownerName || "",
+        ownerPhone: detailed.propertyData?.ownerPhone || "",
+        ownerEmail: detailed.propertyData?.ownerEmail || "",
+        ownerMailingAddress: detailed.propertyData?.ownerMailingAddress || "",
+      };
+
+      // Generate CSV content
+      const headers = [
+        "_id",
+        "address",
+        "houseNumber",
+        "longitude",
+        "latitude",
+        "status",
+        "lastVisited",
+        "notes",
+        "dataSource",
+        "phone",
+        "email",
+        "ownerName",
+        "ownerPhone",
+        "ownerEmail",
+        "ownerMailingAddress",
+      ];
+
+      const csvRows = [
+        headers.join(","),
+        headers
+          .map((header) => {
+            const value = (propertyData as any)[header] || "";
+            if (
+              typeof value === "string" &&
+              (value.includes(",") ||
+                value.includes('"') ||
+                value.includes("\n"))
+            ) {
+              return `"${value.replace(/"/g, '""')}"`;
+            }
+            return value;
+          })
+          .join(","),
+      ];
+
+      const csvContent = csvRows.join("\n");
+      const fileName = `property_${property._id}_${
+        new Date().toISOString().split("T")[0]
+      }.csv`;
+      const fileUri = FileSystem.documentDirectory + fileName;
+
+      await FileSystem.writeAsStringAsync(fileUri, csvContent);
+
+      setPropertyExportProgress(100);
+
+      // Auto-save to Downloads folder
+      try {
+        if (Platform.OS === "android") {
+          // For Android: Use Storage Access Framework to save to Downloads
+          const { StorageAccessFramework } = FileSystem;
+          if (StorageAccessFramework) {
+            const permissions =
+              await StorageAccessFramework.requestDirectoryPermissionsAsync();
+            if (permissions.granted) {
+              // Create file in Downloads folder
+              const downloadFileUri =
+                await StorageAccessFramework.createFileAsync(
+                  permissions.directoryUri,
+                  fileName,
+                  "text/csv"
+                );
+              // Read the file content and write to Downloads
+              const fileContent = await FileSystem.readAsStringAsync(fileUri);
+              await FileSystem.writeAsStringAsync(downloadFileUri, fileContent);
+              Alert.alert("Success", `File saved to Downloads: ${fileName}`);
+            } else {
+              // Fallback to sharing if permission denied
+              const SharingModule = await import("expo-sharing").catch(
+                () => null
+              );
+              if (SharingModule && (await SharingModule.isAvailableAsync?.())) {
+                await SharingModule.shareAsync(fileUri, {
+                  mimeType: "text/csv",
+                  dialogTitle: "Save CSV file",
+                });
+              } else {
+                Alert.alert("Success", `File saved to: ${fileUri}`);
+              }
+            }
+          } else {
+            // Fallback to sharing
+            const SharingModule = await import("expo-sharing").catch(
+              () => null
+            );
+            if (SharingModule && (await SharingModule.isAvailableAsync?.())) {
+              await SharingModule.shareAsync(fileUri, {
+                mimeType: "text/csv",
+                dialogTitle: "Save CSV file",
+              });
+            } else {
+              Alert.alert("Success", `File saved to: ${fileUri}`);
+            }
+          }
+        } else {
+          // For iOS: Share with option to save to Files
+          const SharingModule = await import("expo-sharing").catch(() => null);
+          if (SharingModule && (await SharingModule.isAvailableAsync?.())) {
+            await SharingModule.shareAsync(fileUri, {
+              mimeType: "text/csv",
+              dialogTitle: "Save CSV file",
+              UTI: "public.comma-separated-values-text",
+            });
+          } else {
+            Alert.alert("Success", `File saved to: ${fileUri}`);
+          }
+        }
+      } catch (shareError) {
+        console.error("Sharing error:", shareError);
+        Alert.alert("Success", `File saved to: ${fileUri}`);
+      }
+
+      setIsPropertyExportModalOpen(false);
+      Alert.alert("Success", "Property exported successfully!");
+    } catch (error: any) {
+      console.error("Export error:", error);
+      Alert.alert(
+        "Error",
+        `Failed to export: ${error.message || "Unknown error"}`
+      );
+    } finally {
+      setIsPropertyExporting(false);
+      setPropertyExportProgress(0);
+    }
+  };
+
+  // Export single property to Excel
+  const exportPropertyToExcel = async (property: Property) => {
+    try {
+      setIsPropertyExporting(true);
+      setPropertyExportProgress(0);
+
+      // Fetch detailed data for this property
+      const detailed = await fetchDetailedPropertyData(property._id);
+
+      if (!detailed) {
+        Alert.alert("Error", "Failed to fetch property details");
+        setIsPropertyExporting(false);
+        return;
+      }
+
+      setPropertyExportProgress(50);
+
+      // Prepare data for export
+      const propertyData = {
+        _id: property._id || "",
+        address: detailed.resident?.address || property.address || "",
+        houseNumber:
+          detailed.resident?.houseNumber || property.houseNumber || "",
+        longitude: property.coordinates?.[0] || "",
+        latitude: property.coordinates?.[1] || "",
+        status: detailed.resident?.status || property.status || "",
+        lastVisited:
+          detailed.resident?.lastVisited || property.lastVisited || "",
+        notes: detailed.resident?.notes || property.notes || "",
+        dataSource: property.dataSource || "",
+        phone: detailed.resident?.phone || "",
+        email: detailed.resident?.email || "",
+        ownerName: detailed.propertyData?.ownerName || "",
+        ownerPhone: detailed.propertyData?.ownerPhone || "",
+        ownerEmail: detailed.propertyData?.ownerEmail || "",
+        ownerMailingAddress: detailed.propertyData?.ownerMailingAddress || "",
+      };
+
+      // Create workbook and worksheet
+      const worksheet = XLSX.utils.json_to_sheet([propertyData]);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Property");
+
+      // Generate Excel file as base64 directly
+      const wbout = XLSX.write(workbook, {
+        type: "base64",
+        bookType: "xlsx",
+      });
+
+      // Save file using legacy FileSystem API
+      const fileName = `property_${property._id}_${
+        new Date().toISOString().split("T")[0]
+      }.xlsx`;
+      const fileUri = FileSystem.documentDirectory + fileName;
+
+      // Save the file with base64 encoding
+      await FileSystem.writeAsStringAsync(fileUri, wbout, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      setPropertyExportProgress(100);
+
+      // Auto-save to Downloads folder
+      try {
+        if (Platform.OS === "android") {
+          // For Android: Use Storage Access Framework to save to Downloads
+          const { StorageAccessFramework } = FileSystem;
+          if (StorageAccessFramework) {
+            const permissions =
+              await StorageAccessFramework.requestDirectoryPermissionsAsync();
+            if (permissions.granted) {
+              // Create file in Downloads folder
+              const downloadFileUri =
+                await StorageAccessFramework.createFileAsync(
+                  permissions.directoryUri,
+                  fileName,
+                  "text/csv"
+                );
+              // Read the file content and write to Downloads
+              const fileContent = await FileSystem.readAsStringAsync(fileUri);
+              await FileSystem.writeAsStringAsync(downloadFileUri, fileContent);
+              Alert.alert("Success", `File saved to Downloads: ${fileName}`);
+            } else {
+              // Fallback to sharing if permission denied
+              const SharingModule = await import("expo-sharing").catch(
+                () => null
+              );
+              if (SharingModule && (await SharingModule.isAvailableAsync?.())) {
+                await SharingModule.shareAsync(fileUri, {
+                  mimeType: "text/csv",
+                  dialogTitle: "Save CSV file",
+                });
+              } else {
+                Alert.alert("Success", `File saved to: ${fileUri}`);
+              }
+            }
+          } else {
+            // Fallback to sharing
+            const SharingModule = await import("expo-sharing").catch(
+              () => null
+            );
+            if (SharingModule && (await SharingModule.isAvailableAsync?.())) {
+              await SharingModule.shareAsync(fileUri, {
+                mimeType: "text/csv",
+                dialogTitle: "Save CSV file",
+              });
+            } else {
+              Alert.alert("Success", `File saved to: ${fileUri}`);
+            }
+          }
+        } else {
+          // For iOS: Share with option to save to Files
+          const SharingModule = await import("expo-sharing").catch(() => null);
+          if (SharingModule && (await SharingModule.isAvailableAsync?.())) {
+            await SharingModule.shareAsync(fileUri, {
+              mimeType: "text/csv",
+              dialogTitle: "Save CSV file",
+              UTI: "public.comma-separated-values-text",
+            });
+          } else {
+            Alert.alert("Success", `File saved to: ${fileUri}`);
+          }
+        }
+      } catch (shareError) {
+        console.error("Sharing error:", shareError);
+        Alert.alert("Success", `File saved to: ${fileUri}`);
+      }
+
+      setIsPropertyExportModalOpen(false);
+      Alert.alert("Success", "Property exported successfully!");
+    } catch (error: any) {
+      console.error("Export error:", error);
+      Alert.alert(
+        "Error",
+        `Failed to export: ${error.message || "Unknown error"}`
+      );
+    } finally {
+      setIsPropertyExporting(false);
+      setPropertyExportProgress(0);
+    }
+  };
+
+  // Handle property export
+  const handlePropertyExport = async () => {
+    if (!selectedProperty) {
+      Alert.alert("Error", "No property selected");
+      return;
+    }
+
+    if (propertyExportFormat === "csv") {
+      await exportPropertyToCSV(selectedProperty);
+    } else {
+      await exportPropertyToExcel(selectedProperty);
+    }
   };
 
   // Track sheet index for conditional rendering
@@ -1482,6 +2171,14 @@ export default function TerritoryMapViewScreen() {
         onBackPress={handleBack}
         backgroundColor={COLORS.primary[500]}
         textColor={COLORS.white}
+        rightActionButton={{
+          iconName: "download-outline",
+          onPress: () => {
+            setIsExportModalOpen(true);
+          },
+          backgroundColor: COLORS.primary[300],
+          iconColor: COLORS.white,
+        }}
       />
 
       {/* Status Legend - Horizontal Scrollable (matching web version) */}
@@ -2329,267 +3026,269 @@ export default function TerritoryMapViewScreen() {
                           </View>
                         </View>
                       </View>
-
-                      {/* Property Details Row */}
-                      <View style={styles.propertyDetailStatsRow}>
-                        <View style={styles.propertyDetailStat}>
-                          <Ionicons
-                            name="calendar-outline"
-                            size={responsiveScale(16)}
-                            color={COLORS.text.secondary}
-                          />
-                          <Text style={styles.propertyDetailStatText}>
-                            {detailedProperty.propertyData?.yearBuilt
-                              ? `${
-                                  new Date().getFullYear() -
-                                  detailedProperty.propertyData.yearBuilt
-                                }+ years`
-                              : "20+ years"}
-                          </Text>
-                        </View>
-                        <View style={styles.propertyDetailStat}>
-                          <Ionicons
-                            name="home-outline"
-                            size={responsiveScale(16)}
-                            color={COLORS.text.secondary}
-                          />
-                          <Text style={styles.propertyDetailStatText}>
-                            {detailedProperty.propertyData?.bedrooms || 1}{" "}
-                            occupancy
-                          </Text>
-                        </View>
-                        <View style={styles.propertyDetailStat}>
-                          <Ionicons
-                            name="speedometer-outline"
-                            size={responsiveScale(16)}
-                            color={COLORS.text.secondary}
-                          />
-                          <Text style={styles.propertyDetailStatText}>
-                            {(() => {
-                              if (detailedProperty.propertyData?.leadScore) {
-                                const base =
-                                  Math.floor(
-                                    detailedProperty.propertyData.leadScore / 10
-                                  ) * 10;
-                                return `${base}-${base + 9}`;
-                              }
-                              if (
-                                detailedProperty.propertyData?.estimatedValue
-                              ) {
-                                const base = Math.floor(
-                                  detailedProperty.propertyData.estimatedValue /
-                                    1000
-                                );
-                                return `${base}-${base + 59}`;
-                              }
-                              return "740-799";
-                            })()}
-                          </Text>
-                        </View>
-                      </View>
                     </View>
 
                     {/* Main Content Card */}
                     <View style={styles.propertyDetailContentCard}>
-                      <Text style={styles.propertyDetailSectionTitle}>
-                        Contact Information
-                      </Text>
-
-                      {/* Contact Information */}
-                      {detailedProperty.resident?.phone && (
-                        <TouchableOpacity
-                          style={styles.propertyDetailContactRow}
-                          onPress={() =>
-                            handlePhonePress(detailedProperty.resident.phone)
-                          }
-                        >
-                          <Ionicons
-                            name="call-outline"
-                            size={responsiveScale(20)}
-                            color={COLORS.error[500]}
-                          />
-                          <Text style={styles.propertyDetailContactText}>
-                            {detailedProperty.resident.phone}
+                      {/* Check if Property Information has any data */}
+                      {(detailedProperty.resident?.houseNumber ||
+                        selectedProperty?.houseNumber ||
+                        selectedProperty?.coordinates ||
+                        detailedProperty.resident?.lastVisited ||
+                        selectedProperty?.lastVisited ||
+                        detailedProperty.resident?.notes ||
+                        selectedProperty?.notes) && (
+                        <>
+                          <Text style={styles.propertyDetailSectionTitle}>
+                            Property Information
                           </Text>
-                        </TouchableOpacity>
-                      )}
 
-                      {/* Owner Phone */}
-                      {detailedProperty.propertyData?.ownerPhone && (
-                        <TouchableOpacity
-                          style={styles.propertyDetailContactRow}
-                          onPress={() =>
-                            handlePhonePress(
-                              detailedProperty.propertyData.ownerPhone
-                            )
-                          }
-                        >
-                          <Ionicons
-                            name="call-outline"
-                            size={responsiveScale(20)}
-                            color={COLORS.error[500]}
-                          />
-                          <Text style={styles.propertyDetailContactText}>
-                            Owner: {detailedProperty.propertyData.ownerPhone}
-                          </Text>
-                        </TouchableOpacity>
-                      )}
-
-                      {/* Tags/Badges */}
-                      <View style={styles.propertyDetailTagsContainer}>
-                        {detailedProperty.resident?.houseNumber && (
-                          <View style={styles.propertyDetailTag}>
-                            <Text style={styles.propertyDetailTagText}>
-                              House #{detailedProperty.resident.houseNumber}
-                            </Text>
-                          </View>
-                        )}
-                        {detailedProperty.resident?.status && (
-                          <View style={styles.propertyDetailTag}>
-                            <Text style={styles.propertyDetailTagText}>
-                              {detailedProperty.resident.status}
-                            </Text>
-                          </View>
-                        )}
-                        {detailedProperty.resident?.email && (
-                          <View style={styles.propertyDetailTag}>
-                            <Text style={styles.propertyDetailTagText}>
-                              {detailedProperty.resident.email}
-                            </Text>
-                          </View>
-                        )}
-                        {detailedProperty.resident?.lastVisited && (
-                          <View style={styles.propertyDetailTag}>
-                            <Text style={styles.propertyDetailTagText}>
-                              Last:{" "}
-                              {new Date(
-                                detailedProperty.resident.lastVisited
-                              ).toLocaleDateString()}
-                            </Text>
-                          </View>
-                        )}
-                        {detailedProperty.resident?.assignedAgentId?.name && (
-                          <View style={styles.propertyDetailTag}>
-                            <Text style={styles.propertyDetailTagText}>
-                              Assigned:{" "}
-                              {detailedProperty.resident.assignedAgentId.name}
-                            </Text>
-                          </View>
-                        )}
-                        {detailedProperty.propertyData?.propertyType && (
-                          <View style={styles.propertyDetailTag}>
-                            <Text style={styles.propertyDetailTagText}>
-                              {detailedProperty.propertyData.propertyType.replace(
-                                "_",
-                                " "
-                              )}
-                            </Text>
-                          </View>
-                        )}
-                        {detailedProperty.propertyData?.bedrooms && (
-                          <View style={styles.propertyDetailTag}>
-                            <Text style={styles.propertyDetailTagText}>
-                              {detailedProperty.propertyData.bedrooms} bed
-                            </Text>
-                          </View>
-                        )}
-                        {detailedProperty.propertyData?.estimatedValue && (
-                          <View style={styles.propertyDetailTag}>
-                            <Text style={styles.propertyDetailTagText}>
-                              $
-                              {(
-                                detailedProperty.propertyData.estimatedValue /
-                                1000
-                              ).toFixed(0)}
-                              k
-                            </Text>
-                          </View>
-                        )}
-                        {detailedProperty.propertyData?.leadScore && (
-                          <View style={styles.propertyDetailTag}>
-                            <Text style={styles.propertyDetailTagText}>
-                              Score: {detailedProperty.propertyData.leadScore}
-                            </Text>
-                          </View>
-                        )}
-                        {detailedProperty.propertyData?.ownerName && (
-                          <View style={styles.propertyDetailTag}>
-                            <Text style={styles.propertyDetailTagText}>
-                              {detailedProperty.propertyData.ownerName}
-                            </Text>
-                          </View>
-                        )}
-                        {/* Additional Demographic Tags (matching web) */}
-                        {detailedProperty.propertyData?.estimatedValue && (
-                          <View style={styles.propertyDetailTag}>
-                            <Text style={styles.propertyDetailTagText}>
-                              $
-                              {(
-                                detailedProperty.propertyData.estimatedValue /
-                                1000
-                              ).toFixed(0)}
-                              k income
-                            </Text>
-                          </View>
-                        )}
-                        {detailedProperty.propertyData?.propertyType && (
-                          <View style={styles.propertyDetailTag}>
-                            <Text style={styles.propertyDetailTagText}>
-                              Homeowner
-                            </Text>
-                          </View>
-                        )}
-                        {detailedProperty.propertyData?.ownerName && (
-                          <View style={styles.propertyDetailTag}>
-                            <Text style={styles.propertyDetailTagText}>
-                              Office worker
-                            </Text>
-                          </View>
-                        )}
-                      </View>
-
-                      {/* Zone Information */}
-                      {detailedProperty.zone && (
-                        <View style={styles.propertyDetailZoneInfo}>
-                          <Text style={styles.propertyDetailZoneText}>
-                            <Text style={styles.propertyDetailZoneLabel}>
-                              Zone:
-                            </Text>{" "}
-                            {detailedProperty.zone.name}
-                          </Text>
-                          {detailedProperty.zoneStats && (
-                            <Text style={styles.propertyDetailZoneText}>
-                              <Text style={styles.propertyDetailZoneLabel}>
-                                Progress:
-                              </Text>{" "}
-                              {detailedProperty.zoneStats.visitedResidents}/
-                              {detailedProperty.zoneStats.totalResidents}{" "}
-                              visited
-                            </Text>
+                          {/* House Number */}
+                          {(detailedProperty.resident?.houseNumber ||
+                            selectedProperty?.houseNumber) && (
+                            <View style={styles.propertyDetailContactRow}>
+                              <Ionicons
+                                name="home-outline"
+                                size={responsiveScale(20)}
+                                color={COLORS.text.secondary}
+                              />
+                              <Text style={styles.propertyDetailContactText}>
+                                House #
+                                {detailedProperty.resident?.houseNumber ||
+                                  selectedProperty?.houseNumber}
+                              </Text>
+                            </View>
                           )}
-                        </View>
-                      )}
-                    </View>
 
-                    {/* Export Button */}
-                    <View style={styles.propertyDetailExportContainer}>
-                      <TouchableOpacity
-                        style={styles.propertyDetailExportButton}
-                        onPress={() => {
-                          // Export functionality will be added later
-                          console.log("Export CSV clicked");
-                        }}
-                        activeOpacity={0.7}
-                      >
-                        <Ionicons
-                          name="download-outline"
-                          size={responsiveScale(16)}
-                          color={COLORS.white}
-                        />
-                        <Text style={styles.propertyDetailExportButtonText}>
-                          Export CSV
-                        </Text>
-                      </TouchableOpacity>
+                          {/* Coordinates */}
+                          {selectedProperty?.coordinates && (
+                            <View style={styles.propertyDetailContactRow}>
+                              <Ionicons
+                                name="location-outline"
+                                size={responsiveScale(20)}
+                                color={COLORS.text.secondary}
+                              />
+                              <Text style={styles.propertyDetailContactText}>
+                                {selectedProperty.coordinates[1].toFixed(6)},{" "}
+                                {selectedProperty.coordinates[0].toFixed(6)}
+                              </Text>
+                            </View>
+                          )}
+
+                          {/* Last Visited */}
+                          {(detailedProperty.resident?.lastVisited ||
+                            selectedProperty?.lastVisited) && (
+                            <View style={styles.propertyDetailContactRow}>
+                              <Ionicons
+                                name="calendar-outline"
+                                size={responsiveScale(20)}
+                                color={COLORS.text.secondary}
+                              />
+                              <Text style={styles.propertyDetailContactText}>
+                                Last Visited:{" "}
+                                {new Date(
+                                  detailedProperty.resident?.lastVisited ||
+                                    selectedProperty?.lastVisited ||
+                                    ""
+                                ).toLocaleDateString()}
+                              </Text>
+                            </View>
+                          )}
+
+                          {/* Notes */}
+                          {(detailedProperty.resident?.notes ||
+                            selectedProperty?.notes) && (
+                            <View style={styles.propertyDetailContactRow}>
+                              <Ionicons
+                                name="document-text-outline"
+                                size={responsiveScale(20)}
+                                color={COLORS.text.secondary}
+                              />
+                              <Text style={styles.propertyDetailContactText}>
+                                {detailedProperty.resident?.notes ||
+                                  selectedProperty?.notes}
+                              </Text>
+                            </View>
+                          )}
+                        </>
+                      )}
+
+                      {/* Check if Contact Information has any data */}
+                      {(detailedProperty.resident?.phone ||
+                        detailedProperty.resident?.email) && (
+                        <>
+                          <Text
+                            style={[
+                              styles.propertyDetailSectionTitle,
+                              {
+                                marginTop:
+                                  detailedProperty.resident?.houseNumber ||
+                                  selectedProperty?.houseNumber ||
+                                  selectedProperty?.coordinates ||
+                                  detailedProperty.resident?.lastVisited ||
+                                  selectedProperty?.lastVisited ||
+                                  detailedProperty.resident?.notes ||
+                                  selectedProperty?.notes
+                                    ? responsiveSpacing(SPACING.lg)
+                                    : 0,
+                              },
+                            ]}
+                          >
+                            Contact Information
+                          </Text>
+
+                          {/* Phone */}
+                          {detailedProperty.resident?.phone && (
+                            <TouchableOpacity
+                              style={styles.propertyDetailContactRow}
+                              onPress={() =>
+                                handlePhonePress(
+                                  detailedProperty.resident.phone
+                                )
+                              }
+                            >
+                              <Ionicons
+                                name="call-outline"
+                                size={responsiveScale(20)}
+                                color={COLORS.error[500]}
+                              />
+                              <Text style={styles.propertyDetailContactText}>
+                                {detailedProperty.resident.phone}
+                              </Text>
+                            </TouchableOpacity>
+                          )}
+
+                          {/* Email */}
+                          {detailedProperty.resident?.email && (
+                            <View style={styles.propertyDetailContactRow}>
+                              <Ionicons
+                                name="mail-outline"
+                                size={responsiveScale(20)}
+                                color={COLORS.text.secondary}
+                              />
+                              <Text style={styles.propertyDetailContactText}>
+                                {detailedProperty.resident.email}
+                              </Text>
+                            </View>
+                          )}
+                        </>
+                      )}
+
+                      {/* Owner Information */}
+                      {(detailedProperty.propertyData?.ownerName ||
+                        detailedProperty.propertyData?.ownerPhone ||
+                        detailedProperty.propertyData?.ownerEmail ||
+                        detailedProperty.propertyData?.ownerMailingAddress) && (
+                        <>
+                          <Text
+                            style={[
+                              styles.propertyDetailSectionTitle,
+                              {
+                                marginTop:
+                                  detailedProperty.resident?.houseNumber ||
+                                  selectedProperty?.houseNumber ||
+                                  selectedProperty?.coordinates ||
+                                  detailedProperty.resident?.lastVisited ||
+                                  selectedProperty?.lastVisited ||
+                                  detailedProperty.resident?.notes ||
+                                  selectedProperty?.notes ||
+                                  detailedProperty.resident?.phone ||
+                                  detailedProperty.resident?.email
+                                    ? responsiveSpacing(SPACING.lg)
+                                    : 0,
+                              },
+                            ]}
+                          >
+                            Owner Information
+                          </Text>
+
+                          {/* Owner Name */}
+                          {detailedProperty.propertyData?.ownerName && (
+                            <View style={styles.propertyDetailContactRow}>
+                              <Ionicons
+                                name="person-outline"
+                                size={responsiveScale(20)}
+                                color={COLORS.text.secondary}
+                              />
+                              <Text style={styles.propertyDetailContactText}>
+                                {detailedProperty.propertyData.ownerName}
+                              </Text>
+                            </View>
+                          )}
+
+                          {/* Owner Phone */}
+                          {detailedProperty.propertyData?.ownerPhone && (
+                            <TouchableOpacity
+                              style={styles.propertyDetailContactRow}
+                              onPress={() =>
+                                handlePhonePress(
+                                  detailedProperty.propertyData.ownerPhone
+                                )
+                              }
+                            >
+                              <Ionicons
+                                name="call-outline"
+                                size={responsiveScale(20)}
+                                color={COLORS.error[500]}
+                              />
+                              <Text style={styles.propertyDetailContactText}>
+                                Owner:{" "}
+                                {detailedProperty.propertyData.ownerPhone}
+                              </Text>
+                            </TouchableOpacity>
+                          )}
+
+                          {/* Owner Email */}
+                          {detailedProperty.propertyData?.ownerEmail && (
+                            <View style={styles.propertyDetailContactRow}>
+                              <Ionicons
+                                name="mail-outline"
+                                size={responsiveScale(20)}
+                                color={COLORS.text.secondary}
+                              />
+                              <Text style={styles.propertyDetailContactText}>
+                                {detailedProperty.propertyData.ownerEmail}
+                              </Text>
+                            </View>
+                          )}
+
+                          {/* Owner Mailing Address */}
+                          {detailedProperty.propertyData
+                            ?.ownerMailingAddress && (
+                            <View style={styles.propertyDetailContactRow}>
+                              <Ionicons
+                                name="location-outline"
+                                size={responsiveScale(20)}
+                                color={COLORS.text.secondary}
+                              />
+                              <Text style={styles.propertyDetailContactText}>
+                                {
+                                  detailedProperty.propertyData
+                                    .ownerMailingAddress
+                                }
+                              </Text>
+                            </View>
+                          )}
+                        </>
+                      )}
+
+                      {/* Export Button */}
+                      <View style={styles.propertyDetailExportContainer}>
+                        <TouchableOpacity
+                          style={styles.propertyDetailExportButton}
+                          onPress={() => setIsPropertyExportModalOpen(true)}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons
+                            name="download-outline"
+                            size={responsiveScale(16)}
+                            color={COLORS.white}
+                          />
+                          <Text style={styles.propertyDetailExportButtonText}>
+                            Export
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   </>
                 ) : (
@@ -2735,6 +3434,8 @@ export default function TerritoryMapViewScreen() {
                               <ScrollView
                                 style={styles.addressSuggestionsList}
                                 keyboardShouldPersistTaps="handled"
+                                nestedScrollEnabled={true}
+                                showsVerticalScrollIndicator={true}
                               >
                                 {addressSuggestions.map((suggestion, index) => (
                                   <TouchableOpacity
@@ -3215,6 +3916,357 @@ export default function TerritoryMapViewScreen() {
         territoryId={territoryId}
         onSuccess={handleAddPropertySuccess}
       />
+
+      {/* Export Modal */}
+      <Modal
+        visible={isExportModalOpen}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => {
+          // Modal should only close via close button or cancel button
+          // Do nothing on Android back button press
+        }}
+      >
+        <Pressable
+          style={styles.exportModalOverlay}
+          onPress={() => {
+            // Modal should only close via close button or cancel button
+            // Do nothing on overlay press
+          }}
+        >
+          <View style={styles.exportModalContent}>
+            {/* Modal Header */}
+            <View style={styles.exportModalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.exportModalTitle}>Export Properties</Text>
+                <Text style={styles.exportModalSubtitle}>
+                  Choose export options and format
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => !isExporting && setIsExportModalOpen(false)}
+                style={styles.exportModalCloseButton}
+                disabled={isExporting}
+              >
+                <Ionicons
+                  name="close"
+                  size={responsiveScale(24)}
+                  color={COLORS.text.primary}
+                />
+              </TouchableOpacity>
+            </View>
+
+            {/* Modal Content */}
+            <View style={styles.exportModalScrollWrapper}>
+              <ScrollView
+                style={styles.exportModalScroll}
+                contentContainerStyle={styles.exportModalScrollContent}
+                showsVerticalScrollIndicator={true}
+                nestedScrollEnabled={true}
+              >
+                {/* Export Scope Selection */}
+                <View style={styles.exportOptionSection}>
+                  <Text style={styles.exportOptionSectionTitle}>
+                    Export Scope
+                  </Text>
+                  <View style={styles.radioGroup}>
+                    <TouchableOpacity
+                      style={styles.radioOption}
+                      onPress={() => setExportScope("all")}
+                      disabled={isExporting}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.radioButton}>
+                        {exportScope === "all" && (
+                          <View style={styles.radioButtonInner} />
+                        )}
+                      </View>
+                      <View style={styles.radioOptionText}>
+                        <Text style={styles.radioOptionLabel}>
+                          All Properties
+                        </Text>
+                        <Text style={styles.radioOptionDescription}>
+                          Export all {properties.length} properties
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.radioOption}
+                      onPress={() => setExportScope("filtered")}
+                      disabled={isExporting}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.radioButton}>
+                        {exportScope === "filtered" && (
+                          <View style={styles.radioButtonInner} />
+                        )}
+                      </View>
+                      <View style={styles.radioOptionText}>
+                        <Text style={styles.radioOptionLabel}>
+                          Filtered Properties
+                        </Text>
+                        <Text style={styles.radioOptionDescription}>
+                          Export {filteredProperties.length} filtered properties
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* File Format Selection */}
+                <View style={styles.exportOptionSection}>
+                  <Text style={styles.exportOptionSectionTitle}>
+                    File Format
+                  </Text>
+                  <View style={styles.radioGroup}>
+                    <TouchableOpacity
+                      style={styles.radioOption}
+                      onPress={() => setExportFormat("csv")}
+                      disabled={isExporting}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.radioButton}>
+                        {exportFormat === "csv" && (
+                          <View style={styles.radioButtonInner} />
+                        )}
+                      </View>
+                      <View style={styles.radioOptionText}>
+                        <Text style={styles.radioOptionLabel}>CSV</Text>
+                        <Text style={styles.radioOptionDescription}>
+                          Comma-separated values (.csv)
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.radioOption}
+                      onPress={() => setExportFormat("excel")}
+                      disabled={isExporting}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.radioButton}>
+                        {exportFormat === "excel" && (
+                          <View style={styles.radioButtonInner} />
+                        )}
+                      </View>
+                      <View style={styles.radioOptionText}>
+                        <Text style={styles.radioOptionLabel}>Excel</Text>
+                        <Text style={styles.radioOptionDescription}>
+                          Microsoft Excel (.xlsx)
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Export Progress */}
+                {isExporting && (
+                  <View style={styles.exportProgressContainer}>
+                    <ActivityIndicator
+                      size="small"
+                      color={COLORS.primary[500]}
+                    />
+                    <Text style={styles.exportProgressText}>
+                      Exporting properties... {exportProgress}%
+                    </Text>
+                    <View style={styles.exportProgressBar}>
+                      <View
+                        style={[
+                          styles.exportProgressBarFill,
+                          { width: `${exportProgress}%` },
+                        ]}
+                      />
+                    </View>
+                  </View>
+                )}
+              </ScrollView>
+            </View>
+
+            {/* Modal Footer */}
+            <View style={styles.exportModalFooter}>
+              <TouchableOpacity
+                style={styles.exportModalCancelButton}
+                onPress={() => setIsExportModalOpen(false)}
+                disabled={isExporting}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.exportModalCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.exportModalExportButton,
+                  isExporting && styles.exportModalExportButtonDisabled,
+                ]}
+                onPress={handleExport}
+                disabled={isExporting}
+                activeOpacity={0.7}
+              >
+                {isExporting && (
+                  <ActivityIndicator
+                    size="small"
+                    color={COLORS.white}
+                    style={{ marginRight: responsiveSpacing(SPACING.xs) }}
+                  />
+                )}
+                <Text style={styles.exportModalExportButtonText}>
+                  {isExporting ? "Exporting..." : "Export"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Property Export Modal */}
+      <Modal
+        visible={isPropertyExportModalOpen}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => {
+          // Modal should only close via close button or cancel button
+          // Do nothing on Android back button press
+        }}
+      >
+        <Pressable
+          style={styles.exportModalOverlay}
+          onPress={() => {
+            // Modal should only close via close button or cancel button
+            // Do nothing on overlay press
+          }}
+        >
+          <View style={styles.exportModalContent}>
+            {/* Modal Header */}
+            <View style={styles.exportModalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.exportModalTitle}>Export Property</Text>
+                <Text style={styles.exportModalSubtitle}>
+                  Choose export format
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() =>
+                  !isPropertyExporting && setIsPropertyExportModalOpen(false)
+                }
+                style={styles.exportModalCloseButton}
+                disabled={isPropertyExporting}
+              >
+                <Ionicons
+                  name="close"
+                  size={responsiveScale(24)}
+                  color={COLORS.text.primary}
+                />
+              </TouchableOpacity>
+            </View>
+
+            {/* Modal Content */}
+            <View style={styles.exportModalScrollWrapper}>
+              <ScrollView
+                style={styles.exportModalScroll}
+                contentContainerStyle={styles.exportModalScrollContent}
+                showsVerticalScrollIndicator={true}
+                nestedScrollEnabled={true}
+              >
+                {/* File Format Selection */}
+                <View style={styles.exportOptionSection}>
+                  <Text style={styles.exportOptionSectionTitle}>
+                    File Format
+                  </Text>
+                  <View style={styles.radioGroup}>
+                    <TouchableOpacity
+                      style={styles.radioOption}
+                      onPress={() => setPropertyExportFormat("csv")}
+                      disabled={isPropertyExporting}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.radioButton}>
+                        {propertyExportFormat === "csv" && (
+                          <View style={styles.radioButtonInner} />
+                        )}
+                      </View>
+                      <View style={styles.radioOptionText}>
+                        <Text style={styles.radioOptionLabel}>CSV</Text>
+                        <Text style={styles.radioOptionDescription}>
+                          Comma-separated values (.csv)
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.radioOption}
+                      onPress={() => setPropertyExportFormat("excel")}
+                      disabled={isPropertyExporting}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.radioButton}>
+                        {propertyExportFormat === "excel" && (
+                          <View style={styles.radioButtonInner} />
+                        )}
+                      </View>
+                      <View style={styles.radioOptionText}>
+                        <Text style={styles.radioOptionLabel}>Excel</Text>
+                        <Text style={styles.radioOptionDescription}>
+                          Microsoft Excel (.xlsx)
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Export Progress */}
+                {isPropertyExporting && (
+                  <View style={styles.exportProgressContainer}>
+                    <ActivityIndicator
+                      size="small"
+                      color={COLORS.primary[500]}
+                    />
+                    <Text style={styles.exportProgressText}>
+                      Exporting property... {propertyExportProgress}%
+                    </Text>
+                    <View style={styles.exportProgressBar}>
+                      <View
+                        style={[
+                          styles.exportProgressBarFill,
+                          { width: `${propertyExportProgress}%` },
+                        ]}
+                      />
+                    </View>
+                  </View>
+                )}
+              </ScrollView>
+            </View>
+
+            {/* Modal Footer */}
+            <View style={styles.exportModalFooter}>
+              <TouchableOpacity
+                style={styles.exportModalCancelButton}
+                onPress={() => setIsPropertyExportModalOpen(false)}
+                disabled={isPropertyExporting}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.exportModalCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.exportModalExportButton,
+                  isPropertyExporting && styles.exportModalExportButtonDisabled,
+                ]}
+                onPress={handlePropertyExport}
+                disabled={isPropertyExporting}
+                activeOpacity={0.7}
+              >
+                {isPropertyExporting && (
+                  <ActivityIndicator
+                    size="small"
+                    color={COLORS.white}
+                    style={{ marginRight: responsiveSpacing(SPACING.xs) }}
+                  />
+                )}
+                <Text style={styles.exportModalExportButtonText}>
+                  {isPropertyExporting ? "Exporting..." : "Export"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -3878,6 +4930,25 @@ const styles = StyleSheet.create({
     padding: responsiveSpacing(SPACING.md),
     marginTop: responsiveSpacing(SPACING.md),
   },
+  propertyDetailField: {
+    marginBottom: responsiveSpacing(SPACING.md),
+    paddingBottom: responsiveSpacing(SPACING.md),
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border.light,
+  },
+  propertyDetailFieldLabel: {
+    fontSize: responsiveScale(12),
+    fontWeight: "600",
+    color: COLORS.text.secondary,
+    marginBottom: responsiveSpacing(SPACING.xs / 2),
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  propertyDetailFieldValue: {
+    fontSize: responsiveScale(14),
+    color: COLORS.text.primary,
+    lineHeight: responsiveScale(20),
+  },
   propertyDetailSectionTitle: {
     fontSize: responsiveScale(18),
     fontWeight: "600",
@@ -4285,5 +5356,174 @@ const styles = StyleSheet.create({
     fontSize: responsiveScale(12),
     color: COLORS.error[700],
     marginTop: responsiveSpacing(SPACING.xs / 2),
+  },
+  // Export Modal Styles
+  exportModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: responsiveSpacing(SPACING.md),
+  },
+  exportModalContent: {
+    backgroundColor: COLORS.white,
+    borderRadius: responsiveScale(20),
+    width: "100%",
+    maxWidth: responsiveScale(500),
+    maxHeight: Dimensions.get("window").height * 0.8,
+    height: Dimensions.get("window").height * 0.7,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+    flexDirection: "column",
+  },
+  exportModalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: responsiveSpacing(PADDING.screen),
+    paddingVertical: responsiveSpacing(SPACING.md),
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border.light,
+    flexShrink: 0,
+  },
+  exportModalTitle: {
+    fontSize: responsiveScale(20),
+    fontWeight: "600",
+    color: COLORS.text.primary,
+  },
+  exportModalSubtitle: {
+    fontSize: responsiveScale(12),
+    color: COLORS.text.secondary,
+    marginTop: responsiveSpacing(SPACING.xs / 2),
+  },
+  exportModalCloseButton: {
+    padding: responsiveSpacing(SPACING.xs / 2),
+  },
+  exportModalScrollWrapper: {
+    flex: 1,
+    minHeight: 300,
+  },
+  exportModalScroll: {
+    flex: 1,
+  },
+  exportModalScrollContent: {
+    padding: responsiveSpacing(PADDING.screen),
+    paddingBottom: responsiveSpacing(SPACING.xl),
+  },
+  exportOptionSection: {
+    marginBottom: responsiveSpacing(SPACING.xl),
+  },
+  exportOptionSectionTitle: {
+    fontSize: responsiveScale(16),
+    fontWeight: "600",
+    color: COLORS.text.primary,
+    marginBottom: responsiveSpacing(SPACING.md),
+  },
+  radioGroup: {
+    gap: responsiveSpacing(SPACING.md),
+    marginBottom: responsiveSpacing(SPACING.md),
+  },
+  radioOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: responsiveSpacing(SPACING.md),
+    padding: responsiveSpacing(SPACING.md),
+    backgroundColor: COLORS.neutral[50],
+    borderRadius: responsiveScale(12),
+    borderWidth: 1,
+    borderColor: COLORS.border.light,
+    minHeight: responsiveScale(60),
+  },
+  radioButton: {
+    width: responsiveScale(20),
+    height: responsiveScale(20),
+    borderRadius: responsiveScale(10),
+    borderWidth: 2,
+    borderColor: COLORS.primary[500],
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  radioButtonInner: {
+    width: responsiveScale(12),
+    height: responsiveScale(12),
+    borderRadius: responsiveScale(6),
+    backgroundColor: COLORS.primary[500],
+  },
+  radioOptionText: {
+    flex: 1,
+  },
+  radioOptionLabel: {
+    fontSize: responsiveScale(16),
+    fontWeight: "500",
+    color: COLORS.text.primary,
+    marginBottom: responsiveSpacing(SPACING.xs / 2),
+  },
+  radioOptionDescription: {
+    fontSize: responsiveScale(12),
+    color: COLORS.text.secondary,
+  },
+  exportProgressContainer: {
+    marginTop: responsiveSpacing(SPACING.md),
+    padding: responsiveSpacing(SPACING.md),
+    backgroundColor: COLORS.primary[50],
+    borderRadius: responsiveScale(12),
+    gap: responsiveSpacing(SPACING.sm),
+  },
+  exportProgressText: {
+    fontSize: responsiveScale(14),
+    color: COLORS.primary[600],
+    fontWeight: "500",
+  },
+  exportProgressBar: {
+    height: responsiveScale(8),
+    backgroundColor: COLORS.neutral[200],
+    borderRadius: responsiveScale(4),
+    overflow: "hidden",
+  },
+  exportProgressBarFill: {
+    height: "100%",
+    backgroundColor: COLORS.primary[500],
+    borderRadius: responsiveScale(4),
+  },
+  exportModalFooter: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: responsiveSpacing(SPACING.sm),
+    paddingHorizontal: responsiveSpacing(PADDING.screen),
+    paddingVertical: responsiveSpacing(SPACING.md),
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border.light,
+    flexShrink: 0,
+  },
+  exportModalCancelButton: {
+    paddingHorizontal: responsiveSpacing(SPACING.md),
+    paddingVertical: responsiveSpacing(SPACING.sm),
+    borderRadius: responsiveScale(8),
+    backgroundColor: COLORS.neutral[100],
+  },
+  exportModalCancelButtonText: {
+    fontSize: responsiveScale(14),
+    color: COLORS.text.secondary,
+    fontWeight: "500",
+  },
+  exportModalExportButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: responsiveSpacing(SPACING.sm),
+    paddingHorizontal: responsiveSpacing(SPACING.md),
+    borderRadius: responsiveScale(8),
+    backgroundColor: COLORS.primary[500],
+  },
+  exportModalExportButtonDisabled: {
+    opacity: 0.5,
+  },
+  exportModalExportButtonText: {
+    fontSize: responsiveScale(14),
+    color: COLORS.white,
+    fontWeight: "600",
   },
 });

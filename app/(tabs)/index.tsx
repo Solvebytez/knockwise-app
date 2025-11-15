@@ -4,14 +4,17 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  ActivityIndicator,
+  RefreshControl,
 } from "react-native";
 import { Image } from "expo-image";
 import { StatusBar } from "expo-status-bar";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { useAuthStore } from "@/store/authStore";
-import { apiInstance } from "@/lib/apiInstance";
+import { getMyRoutes } from "@/lib/routeApi";
+import { useMyActivities, Activity } from "@/lib/activityApi";
+import { useAgentDashboardStats } from "@/lib/agentDashboardApi";
+import { getActivityColors } from "@/lib/activityColors";
 import {
   COLORS,
   SPACING,
@@ -21,84 +24,268 @@ import {
 } from "@/constants";
 import { Text, H2, H3, Body2 } from "@/components/ui";
 import { SideDrawer } from "@/components/ui/SideDrawer";
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 
 export default function HomeScreen() {
   const { user } = useAuthStore();
   const router = useRouter();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Fetch territories data
-  const { data: territoriesData, isLoading } = useQuery({
-    queryKey: ["myTerritories"],
-    queryFn: async () => {
-      const response = await apiInstance.get("/users/my-territories", {
-        headers: {
-          Cookie: await SecureStore.getItemAsync("csrfCookie"),
-        },
-      });
-      return response.data;
-    },
-    refetchOnWindowFocus: false,
-  });
-
-  const territories = territoriesData?.data?.territories || [];
-  const summary = territoriesData?.data?.summary || {};
-
-  // Calculate stats from real data
-  const agentStats = {
-    todayTasks: 12,
-    completedTasks: 8,
-    pendingTasks: 4,
-    performance: summary.completionPercentage || 85,
-    territories: territories.length,
-    teamMembers: 5,
-    routes: 2,
+  // Get today's date in YYYY-MM-DD format
+  const getTodayDate = () => {
+    const today = new Date();
+    return today.toISOString().split("T")[0];
   };
 
-  // Mock data for schedule and activities
-  const upcomingTasks = [
-    {
-      id: 1,
-      title: "Downtown District Visit",
-      time: "9:00 AM - 12:00 PM",
-      houses: 30,
-      priority: "high",
-    },
-    {
-      id: 2,
-      title: "Westside Residential Area",
-      time: "2:00 PM - 5:00 PM",
-      houses: 25,
-      priority: "medium",
-    },
-  ];
+  const todayDate = getTodayDate();
 
-  const recentActivities = [
-    {
-      id: 1,
-      type: "task_completed",
-      title: "Completed territory visit",
-      description: "Finished knocking on 25 houses in Downtown District",
-      time: "2 hours ago",
-      status: "completed",
-    },
-    {
-      id: 2,
-      type: "new_assignment",
-      title: "New territory assigned",
-      description: "Assigned to Westside Residential Area",
-      time: "4 hours ago",
-      status: "pending",
-    },
-    {
-      id: 3,
-      type: "route_optimized",
-      title: "Route optimized",
-      description: "New optimized route available for tomorrow",
-      time: "6 hours ago",
-      status: "completed",
-    },
-  ];
+  // SECTION 1: Stats Cards - Independent Loading
+  // Use new agent-specific dashboard stats endpoint
+  const {
+    data: dashboardData,
+    isLoading: isLoadingStats,
+    isError: isErrorStats,
+    error: statsError,
+    refetch: refetchStats,
+  } = useAgentDashboardStats();
+
+  // Log error details for debugging
+  if (isErrorStats && statsError) {
+    console.error("❌ Dashboard stats error:", statsError);
+  }
+
+  const agentStats = useMemo(() => {
+    return (
+      dashboardData?.data?.stats || {
+        todayTasks: 0,
+        completedTasks: 0,
+        pendingTasks: 0,
+        performance: 0,
+        territories: 0,
+        routes: 0,
+        totalVisitsToday: 0,
+        leadsCreatedToday: 0,
+        totalPropertiesInCreatedZones: 0,
+      }
+    );
+  }, [dashboardData?.data?.stats]);
+
+  // SECTION 2: Today's Schedule - Independent Loading
+  // Use schedule from dashboard stats, but also allow fallback to separate query
+  const {
+    data: scheduleData,
+    isLoading: isLoadingScheduleFallback,
+    isError: isErrorSchedule,
+    refetch: refetchSchedule,
+  } = useQuery({
+    queryKey: ["todaySchedule", todayDate],
+    queryFn: () =>
+      getMyRoutes({
+        date: todayDate,
+        limit: 20,
+      }),
+    refetchOnWindowFocus: false,
+    retry: 2,
+    enabled: !dashboardData?.data?.todaySchedule, // Only fetch if dashboard doesn't have it
+  });
+
+  // Schedule loading: true if dashboard is loading OR fallback is loading
+  const isLoadingSchedule =
+    isLoadingStats ||
+    (isLoadingScheduleFallback && !dashboardData?.data?.todaySchedule);
+
+  // Transform routes to schedule format
+  const upcomingTasks = useMemo(() => {
+    // Use dashboard schedule if available, otherwise use separate query
+    const scheduleRoutes =
+      dashboardData?.data?.todaySchedule || scheduleData?.routes || [];
+
+    if (!scheduleRoutes || scheduleRoutes.length === 0) return [];
+    // Filter routes by status (PLANNED or IN_PROGRESS) and limit to 10
+    const filteredRoutes = scheduleRoutes
+      .filter(
+        (route: any) =>
+          route.status === "PLANNED" || route.status === "IN_PROGRESS"
+      )
+      .slice(0, 10);
+
+    return filteredRoutes.map((route: any) => {
+      // Calculate time window from route duration or use default
+      const durationHours = Math.ceil(route.totalDuration / 60);
+      // Try to use route's optimization settings for start time, otherwise default to 9 AM
+      const startHour = route.optimizationSettings?.preferredTimeWindow?.start
+        ? parseInt(
+            route.optimizationSettings.preferredTimeWindow.start.split(":")[0]
+          )
+        : 9;
+      const endHour = startHour + durationHours;
+
+      // Format time
+      const formatTime = (hour: number) => {
+        const period = hour >= 12 ? "PM" : "AM";
+        const displayHour = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
+        return `${displayHour}:00 ${period}`;
+      };
+
+      // Map priority
+      const priorityMap: Record<string, string> = {
+        URGENT: "high",
+        HIGH: "high",
+        MEDIUM: "medium",
+        LOW: "low",
+      };
+
+      return {
+        id: route._id,
+        title: route.zoneId?.name || route.name,
+        time: `${formatTime(startHour)} - ${formatTime(endHour)}`,
+        houses: route.stops?.length || route.analytics?.totalStops || 0,
+        priority: priorityMap[route.priority] || "medium",
+      };
+    });
+  }, [dashboardData?.data?.todaySchedule, scheduleData?.routes]);
+
+  // SECTION 3: Recent Activities - Independent Loading
+  // Use activities from dashboard stats, but also allow fallback to separate query
+  const {
+    data: activitiesData,
+    isLoading: isLoadingActivities,
+    isError: isErrorActivities,
+    refetch: refetchActivities,
+  } = useMyActivities({
+    limit: 10,
+    page: 1,
+  });
+
+  // Transform activities to display format
+  const recentActivities = useMemo(() => {
+    // Use dashboard activities if available, otherwise use separate query
+    const activitiesList =
+      dashboardData?.data?.recentActivities || activitiesData?.data || [];
+
+    if (!activitiesList || activitiesList.length === 0) return [];
+
+    const formatTimeAgo = (dateString: string) => {
+      const now = new Date();
+      const activityDate = new Date(dateString);
+      const diffMs = now.getTime() - activityDate.getTime();
+      const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+      const diffMinutes = Math.floor(diffMs / (1000 * 60));
+
+      if (diffHours > 0) {
+        return `${diffHours} ${diffHours === 1 ? "hour" : "hours"} ago`;
+      } else if (diffMinutes > 0) {
+        return `${diffMinutes} ${diffMinutes === 1 ? "minute" : "minutes"} ago`;
+      }
+      return "Just now";
+    };
+
+    const getActivityType = (response?: string) => {
+      if (!response) return "task_completed";
+      const typeMap: Record<string, string> = {
+        LEAD_CREATED: "task_completed",
+        APPOINTMENT_SET: "task_completed",
+        CALL_BACK: "task_completed",
+        FOLLOW_UP: "task_completed",
+        NOT_INTERESTED: "task_completed",
+        NO_ANSWER: "task_completed",
+      };
+      return typeMap[response] || "task_completed";
+    };
+
+    const getActivityTitle = (activity: Activity) => {
+      // Handle different activity types FIRST (before checking response)
+      if (activity.activityType === "ZONE_OPERATION") {
+        const operation = activity.operationType?.toLowerCase() || "updated";
+        return `Zone ${operation}`;
+      }
+      if (activity.activityType === "PROPERTY_OPERATION") {
+        const operation = activity.operationType?.toLowerCase() || "updated";
+        return `Property ${operation}`;
+      }
+
+      // Handle VISIT activities (only if activityType is VISIT or undefined/legacy)
+      if (!activity.response) return "Visit completed";
+      const titleMap: Record<string, string> = {
+        LEAD_CREATED: "Lead created",
+        APPOINTMENT_SET: "Appointment set",
+        CALL_BACK: "Callback scheduled",
+        FOLLOW_UP: "Follow-up completed",
+        NOT_INTERESTED: "Visit completed",
+        NO_ANSWER: "Visit completed",
+      };
+      return titleMap[activity.response] || "Visit completed";
+    };
+
+    const getActivityDescription = (activity: Activity) => {
+      if (activity.activityType === "ZONE_OPERATION") {
+        const zoneName = activity.zoneId?.name || "territory";
+        return (
+          activity.notes ||
+          `Zone ${activity.operationType?.toLowerCase()} in ${zoneName}`
+        );
+      }
+      if (activity.activityType === "PROPERTY_OPERATION") {
+        const zoneName = activity.zoneId?.name || "territory";
+        const address = activity.propertyId?.addressLine1 || "";
+
+        // Parse notes to extract status changes
+        if (activity.notes) {
+          // Check if notes contain status change pattern: "status: "old" → "new""
+          const statusMatch = activity.notes.match(
+            /status:\s*"([^"]+)"\s*→\s*"([^"]+)"/
+          );
+          if (statusMatch) {
+            const [, , newStatus] = statusMatch;
+            // Format status for display (capitalize first letter, replace hyphens)
+            const formattedStatus = newStatus
+              .split("-")
+              .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+              .join(" ");
+            return `Property status changed to '${formattedStatus}' in ${zoneName}`;
+          }
+        }
+
+        // Fallback to default message
+        return (
+          activity.notes ||
+          (address
+            ? `Property ${activity.operationType?.toLowerCase()} at ${address} in ${zoneName}`
+            : `Property ${activity.operationType?.toLowerCase()} in ${zoneName}`)
+        );
+      }
+
+      // Handle VISIT activities
+      const zoneName = activity.zoneId?.name || "territory";
+      const address = activity.propertyId?.addressLine1 || "";
+      return address
+        ? `${getActivityTitle(activity)} at ${address} in ${zoneName}`
+        : `${getActivityTitle(activity)} in ${zoneName}`;
+    };
+
+    return activitiesList
+      .slice(0, 4) // Limit to latest 4 activities
+      .map((activity) => {
+        const status =
+          activity.activityType === "ZONE_OPERATION" ||
+          activity.activityType === "PROPERTY_OPERATION"
+            ? "completed"
+            : activity.response === "LEAD_CREATED" ||
+              activity.response === "APPOINTMENT_SET"
+            ? "completed"
+            : "pending";
+
+        return {
+          id: activity._id,
+          type: getActivityType(activity.response),
+          title: getActivityTitle(activity),
+          description: getActivityDescription(activity),
+          time: formatTimeAgo(activity.startedAt || activity.createdAt), // Use startedAt (when activity happened) instead of createdAt
+          status,
+        };
+      });
+  }, [dashboardData?.data?.recentActivities, activitiesData?.data]);
 
   // Format date
   const formatDate = () => {
@@ -117,8 +304,41 @@ export default function HomeScreen() {
     setIsDrawerOpen(false);
   }, []);
 
+  // Pull to refresh handler
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        refetchStats(),
+        refetchSchedule(),
+        refetchActivities(),
+      ]);
+    } catch (error) {
+      console.error("Error refreshing data:", error);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refetchStats, refetchSchedule, refetchActivities]);
+
+  // Navigation handlers
+  const handleViewAllRoutes = useCallback(() => {
+    router.push("/(tabs)/my-routes");
+  }, [router]);
+
+  const handleSeeAllActivities = useCallback(() => {
+    router.push("/(tabs)/activities");
+  }, [router]);
+
   const menuItems = useMemo(
     () => [
+      {
+        id: "activities",
+        label: "Activities",
+        onPress: () => {
+          setIsDrawerOpen(false);
+          router.push("/(tabs)/activities");
+        },
+      },
       {
         id: "create-zone",
         label: "Create Zone",
@@ -139,16 +359,7 @@ export default function HomeScreen() {
     [router]
   );
 
-  if (isLoading) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={COLORS.primary[500]} />
-          <Text style={styles.loadingText}>Loading dashboard...</Text>
-        </View>
-      </View>
-    );
-  }
+  // No global loading - each section loads independently
 
   return (
     <View style={styles.container}>
@@ -157,6 +368,14 @@ export default function HomeScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[COLORS.primary[500]]}
+            tintColor={COLORS.primary[500]}
+          />
+        }
       >
         {/* Header Section */}
         <View style={styles.header}>
@@ -168,15 +387,16 @@ export default function HomeScreen() {
             />
           </View>
           <View style={styles.headerRight}>
-            <TouchableOpacity style={styles.iconButton} onPress={handleOpenDrawer}>
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={handleOpenDrawer}
+            >
               <Text style={styles.iconText}>☰</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.iconButton}>
               <View style={styles.bellContainer}>
                 <Text style={styles.iconText}>🔔</Text>
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>1</Text>
-                </View>
+                {/* TODO: Add notification count from API when available */}
               </View>
             </TouchableOpacity>
           </View>
@@ -223,198 +443,333 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Stats Cards */}
+        {/* Stats Cards - Independent Loading */}
         <View style={styles.statsContainer}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.statsScrollContent}
-            style={styles.statsScrollView}
-          >
-            <View style={[styles.statCard, styles.statCard1]}>
-              <Text
-                variant="body2"
-                color={COLORS.text.secondary}
-                style={styles.statLabel}
-              >
-                Today&apos;s Tasks
-              </Text>
-              <Text
-                variant="h1"
-                color={COLORS.text.primary}
-                weight="bold"
-                style={styles.statValue}
-              >
-                {agentStats.todayTasks}
-              </Text>
-              <View style={styles.statFooterFirst}>
-                <Body2 color={COLORS.success[600]}>
-                  {agentStats.completedTasks} done
-                </Body2>
-                <Body2 color={COLORS.text.secondary}>
-                  {agentStats.pendingTasks} pending
-                </Body2>
-              </View>
+          {isErrorStats ? (
+            <View style={styles.errorContainer}>
+              <Body2 color={COLORS.error[500]}>
+                Failed to load stats. Pull down to refresh.
+              </Body2>
             </View>
+          ) : isLoadingStats ? (
+            <View style={styles.statsLoadingContainer}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.statsScrollContent}
+              >
+                {[1, 2, 3, 4].map((i) => (
+                  <View
+                    key={i}
+                    style={[styles.statCard, styles.statCardSkeleton]}
+                  >
+                    <View style={styles.skeletonLine} />
+                    <View
+                      style={[styles.skeletonLine, styles.skeletonLineLarge]}
+                    />
+                    <View style={styles.skeletonLine} />
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+          ) : (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.statsScrollContent}
+              style={styles.statsScrollView}
+            >
+              <View style={[styles.statCard, styles.statCard1]}>
+                <View style={styles.statHeader}>
+                  <MaterialIcons
+                    name="checklist"
+                    size={responsiveScale(20)}
+                    color={COLORS.primary[600]}
+                  />
+                  <Text
+                    variant="body2"
+                    color={COLORS.text.secondary}
+                    style={styles.statLabel}
+                  >
+                    Activities Today
+                  </Text>
+                </View>
+                <Text
+                  variant="h1"
+                  color={COLORS.text.primary}
+                  weight="bold"
+                  style={styles.statValue}
+                >
+                  {agentStats.todayTasks}
+                </Text>
+              </View>
 
-            <View style={[styles.statCard, styles.statCard2]}>
-              <Text
-                variant="body2"
-                color={COLORS.text.secondary}
-                style={styles.statLabel}
-              >
-                Performance
-              </Text>
-              <Text
-                variant="h1"
-                color={COLORS.text.primary}
-                weight="bold"
-                style={styles.statValue}
-              >
-                {agentStats.performance}%
-              </Text>
-              <View style={styles.statFooter}>
-                <Body2 color={COLORS.success[600]}>+2.1% this week</Body2>
+              <View style={[styles.statCard, styles.statCard2]}>
+                <View style={styles.statHeader}>
+                  <MaterialIcons
+                    name="domain"
+                    size={responsiveScale(20)}
+                    color={COLORS.success[600]}
+                  />
+                  <Text
+                    variant="body2"
+                    color={COLORS.text.secondary}
+                    style={styles.statLabel}
+                  >
+                    Total Properties
+                  </Text>
+                </View>
+                <Text
+                  variant="h1"
+                  color={COLORS.text.primary}
+                  weight="bold"
+                  style={styles.statValue}
+                >
+                  {agentStats.totalPropertiesInCreatedZones || 0}
+                </Text>
               </View>
-            </View>
 
-            <View style={[styles.statCard, styles.statCard3]}>
-              <Text
-                variant="body2"
-                color={COLORS.text.secondary}
-                style={styles.statLabel}
-              >
-                Territories
-              </Text>
-              <Text
-                variant="h1"
-                color={COLORS.text.primary}
-                weight="bold"
-                style={styles.statValue}
-              >
-                {agentStats.territories}
-              </Text>
-              <View style={styles.statFooter}>
-                <Body2 color={COLORS.text.secondary}>
-                  {agentStats.routes} routes
-                </Body2>
+              <View style={[styles.statCard, styles.statCard3]}>
+                <View style={styles.statHeader}>
+                  <MaterialIcons
+                    name="map"
+                    size={responsiveScale(20)}
+                    color={COLORS.warning[600]}
+                  />
+                  <Text
+                    variant="body2"
+                    color={COLORS.text.secondary}
+                    style={styles.statLabel}
+                  >
+                    Territories
+                  </Text>
+                </View>
+                <Text
+                  variant="h1"
+                  color={COLORS.text.primary}
+                  weight="bold"
+                  style={styles.statValue}
+                >
+                  {agentStats.territories}
+                </Text>
+                <View style={styles.statFooter}>
+                  <Body2 color={COLORS.text.secondary}>
+                    {agentStats.routes} routes
+                  </Body2>
+                </View>
               </View>
-            </View>
 
-            <View style={[styles.statCard, styles.statCard4]}>
-              <Text
-                variant="body2"
-                color={COLORS.text.secondary}
-                style={styles.statLabel}
-              >
-                Team
-              </Text>
-              <Text
-                variant="h1"
-                color={COLORS.text.primary}
-                weight="bold"
-                style={styles.statValue}
-              >
-                {agentStats.teamMembers}
-              </Text>
-              <View style={styles.statFooter}>
-                <Body2 color={COLORS.text.secondary}>Members</Body2>
+              <View style={[styles.statCard, styles.statCard4]}>
+                <View style={styles.statHeader}>
+                  <MaterialIcons
+                    name="home"
+                    size={responsiveScale(20)}
+                    color={COLORS.purple[600]}
+                  />
+                  <Text
+                    variant="body2"
+                    color={COLORS.text.secondary}
+                    style={styles.statLabel}
+                  >
+                    Visits Today
+                  </Text>
+                </View>
+                <Text
+                  variant="h1"
+                  color={COLORS.text.primary}
+                  weight="bold"
+                  style={styles.statValue}
+                >
+                  {agentStats.totalVisitsToday || 0}
+                </Text>
+                <View style={styles.statFooter}>
+                  <Body2 color={COLORS.success[600]}>
+                    {agentStats.leadsCreatedToday || 0} leads
+                  </Body2>
+                </View>
               </View>
-            </View>
-          </ScrollView>
+            </ScrollView>
+          )}
         </View>
 
-        {/* Today's Schedule Section */}
+        {/* Today's Schedule Section - Independent Loading */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <H3>Today&apos;s Schedule</H3>
-            <TouchableOpacity>
+            <TouchableOpacity onPress={handleViewAllRoutes}>
               <Body2 color={COLORS.primary[500]}>View All</Body2>
             </TouchableOpacity>
           </View>
-          <View style={styles.tasksContainer}>
-            {upcomingTasks.map((task) => (
-              <View key={task.id} style={styles.taskCard}>
-                <View style={styles.taskContent}>
-                  <View
-                    style={[
-                      styles.priorityBar,
-                      task.priority === "high"
-                        ? styles.priorityHigh
-                        : styles.priorityMedium,
-                    ]}
-                  />
-                  <View style={styles.taskInfo}>
-                    <Text
-                      variant="body1"
-                      weight="semiBold"
-                      color={COLORS.text.primary}
-                      style={{ marginBottom: responsiveSpacing(SPACING.xs) }}
-                    >
-                      {task.title}
-                    </Text>
-                    <View style={styles.taskMeta}>
-                      <Body2 color={COLORS.text.secondary}>{task.time}</Body2>
-                      <Body2 color={COLORS.text.secondary}> • </Body2>
-                      <Body2 color={COLORS.text.secondary}>
-                        {task.houses} houses
-                      </Body2>
+          {isErrorSchedule ? (
+            <View style={styles.errorContainer}>
+              <Body2 color={COLORS.error[500]}>
+                Failed to load schedule. Pull down to refresh.
+              </Body2>
+            </View>
+          ) : isLoadingSchedule ? (
+            <View style={styles.sectionLoadingContainer}>
+              {[1, 2].map((i) => (
+                <View
+                  key={i}
+                  style={[styles.taskCard, styles.taskCardSkeleton]}
+                >
+                  <View style={styles.skeletonLine} />
+                  <View style={styles.skeletonLine} />
+                </View>
+              ))}
+            </View>
+          ) : upcomingTasks.length > 0 ? (
+            <View style={styles.tasksContainer}>
+              {upcomingTasks.map((task) => (
+                <View key={task.id} style={styles.taskCard}>
+                  <View style={styles.taskContent}>
+                    <View
+                      style={[
+                        styles.priorityBar,
+                        task.priority === "high"
+                          ? styles.priorityHigh
+                          : task.priority === "medium"
+                          ? styles.priorityMedium
+                          : styles.priorityLow,
+                      ]}
+                    />
+                    <View style={styles.taskInfo}>
+                      <Text
+                        variant="body1"
+                        weight="semiBold"
+                        color={COLORS.text.primary}
+                        style={{ marginBottom: responsiveSpacing(SPACING.xs) }}
+                      >
+                        {task.title}
+                      </Text>
+                      <View style={styles.taskMeta}>
+                        <Body2 color={COLORS.text.secondary}>{task.time}</Body2>
+                        <Body2 color={COLORS.text.secondary}> • </Body2>
+                        <Body2 color={COLORS.text.secondary}>
+                          {task.houses} houses
+                        </Body2>
+                      </View>
                     </View>
                   </View>
                 </View>
-              </View>
-            ))}
-          </View>
+              ))}
+            </View>
+          ) : (
+            <View style={styles.emptyStateContainer}>
+              <Body2 color={COLORS.text.secondary}>
+                No scheduled tasks for today
+              </Body2>
+            </View>
+          )}
         </View>
 
-        {/* Recent Activities Section */}
+        {/* Recent Activities Section - Independent Loading */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <H3>Recent Activities</H3>
-            <TouchableOpacity>
+            <TouchableOpacity onPress={handleSeeAllActivities}>
               <Body2 color={COLORS.primary[500]}>See All</Body2>
             </TouchableOpacity>
           </View>
-          <View style={styles.activitiesContainer}>
-            {recentActivities.map((activity) => (
-              <View key={activity.id} style={styles.activityItem}>
-                <View
-                  style={[
-                    styles.activityDot,
-                    activity.status === "completed"
-                      ? styles.dotCompleted
-                      : styles.dotPending,
-                  ]}
-                />
-                <View
-                  style={[
-                    styles.activityContent,
-                    activity.status === "completed"
-                      ? styles.activityContentCompleted
-                      : styles.activityContentPending,
-                  ]}
-                >
-                  <Text
-                    variant="body1"
-                    weight="medium"
-                    color={COLORS.text.primary}
-                    style={styles.activityTitle}
+          {isErrorActivities ? (
+            <View style={styles.errorContainer}>
+              <Body2 color={COLORS.error[500]}>
+                Failed to load activities. Pull down to refresh.
+              </Body2>
+            </View>
+          ) : isLoadingActivities ? (
+            <View style={styles.sectionLoadingContainer}>
+              {[1, 2, 3].map((i) => (
+                <View key={i} style={styles.activityItem}>
+                  <View
+                    style={[styles.activityDot, styles.activityDotSkeleton]}
+                  />
+                  <View
+                    style={[
+                      styles.activityContent,
+                      styles.activityContentSkeleton,
+                    ]}
                   >
-                    {activity.title}
-                  </Text>
-                  <Body2
-                    color={COLORS.text.secondary}
-                    style={styles.activityDesc}
-                  >
-                    {activity.description}
-                  </Body2>
-                  <Body2 color={COLORS.text.light} style={styles.activityTime}>
-                    {activity.time}
-                  </Body2>
+                    <View style={styles.skeletonLine} />
+                    <View style={styles.skeletonLine} />
+                    <View
+                      style={[styles.skeletonLine, styles.skeletonLineSmall]}
+                    />
+                  </View>
                 </View>
-              </View>
-            ))}
-          </View>
+              ))}
+            </View>
+          ) : recentActivities.length > 0 ? (
+            <View style={styles.activitiesContainer}>
+              {recentActivities.map((activity) => {
+                // Get activity from the original data to access activityType and response
+                const originalActivity =
+                  dashboardData?.data?.recentActivities?.find(
+                    (a) => a._id === activity.id
+                  ) || activitiesData?.data?.find((a) => a._id === activity.id);
+
+                console.log("🏠 Home Screen - Activity:", {
+                  activityId: activity.id,
+                  activityTitle: activity.title,
+                  hasOriginalActivity: !!originalActivity,
+                  originalActivityType: originalActivity?.activityType,
+                  originalResponse: originalActivity?.response,
+                  originalOperationType: originalActivity?.operationType,
+                });
+
+                const colors = originalActivity
+                  ? getActivityColors(originalActivity)
+                  : {
+                      dotColor: COLORS.neutral[500],
+                      backgroundColor: COLORS.neutral[50],
+                    };
+
+                console.log("🏠 Home Screen - Colors assigned:", colors);
+
+                return (
+                  <View key={activity.id} style={styles.activityItem}>
+                    <View
+                      style={[
+                        styles.activityDot,
+                        { backgroundColor: colors.dotColor },
+                      ]}
+                    />
+                    <View
+                      style={[
+                        styles.activityContent,
+                        { backgroundColor: colors.backgroundColor },
+                      ]}
+                    >
+                      <Text
+                        variant="body1"
+                        weight="medium"
+                        color={COLORS.text.primary}
+                        style={styles.activityTitle}
+                      >
+                        {activity.title}
+                      </Text>
+                      <Body2
+                        color={COLORS.text.secondary}
+                        style={styles.activityDesc}
+                      >
+                        {activity.description}
+                      </Body2>
+                      <Body2
+                        color={COLORS.text.light}
+                        style={styles.activityTime}
+                      >
+                        {activity.time}
+                      </Body2>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          ) : (
+            <View style={styles.emptyStateContainer}>
+              <Body2 color={COLORS.text.secondary}>No recent activities</Body2>
+            </View>
+          )}
         </View>
       </ScrollView>
       <SideDrawer visible={isDrawerOpen} onClose={handleCloseDrawer}>
@@ -431,11 +786,7 @@ export default function HomeScreen() {
               style={styles.drawerItem}
               onPress={item.onPress}
             >
-              <Text
-                variant="body1"
-                weight="medium"
-                color={COLORS.text.primary}
-              >
+              <Text variant="body1" weight="medium" color={COLORS.text.primary}>
                 {item.label}
               </Text>
             </TouchableOpacity>
@@ -612,7 +963,8 @@ const styles = StyleSheet.create({
   },
   statCard: {
     paddingTop: responsiveSpacing(SPACING.lg),
-    paddingHorizontal: responsiveSpacing(SPACING.lg),
+    paddingLeft: responsiveSpacing(SPACING.sm),
+    paddingRight: responsiveSpacing(SPACING.lg),
     paddingBottom: responsiveSpacing(SPACING.lg + SPACING.xs),
     borderRadius: responsiveScale(16),
     width: responsiveScale(140),
@@ -634,11 +986,18 @@ const styles = StyleSheet.create({
   statCard4: {
     backgroundColor: COLORS.purple[100],
   },
-  statLabel: {
+  statHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: responsiveSpacing(SPACING.xs),
     marginBottom: responsiveSpacing(SPACING.xs),
+  },
+  statLabel: {
+    marginBottom: 0,
   },
   statValue: {
     marginBottom: responsiveSpacing(SPACING.xs),
+    textAlign: "center",
   },
   statFooter: {
     flexDirection: "row",
@@ -709,12 +1068,6 @@ const styles = StyleSheet.create({
     borderRadius: responsiveScale(5),
     marginTop: responsiveSpacing(SPACING.sm),
   },
-  dotCompleted: {
-    backgroundColor: COLORS.success[500],
-  },
-  dotPending: {
-    backgroundColor: COLORS.primary[500],
-  },
   activityContent: {
     flex: 1,
     padding: responsiveSpacing(SPACING.md),
@@ -724,12 +1077,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 1,
-  },
-  activityContentCompleted: {
-    backgroundColor: COLORS.success[50],
-  },
-  activityContentPending: {
-    backgroundColor: COLORS.primary[50],
   },
   activityTitle: {
     fontSize: responsiveScale(14),
@@ -752,5 +1099,54 @@ const styles = StyleSheet.create({
     paddingVertical: responsiveSpacing(SPACING.sm),
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.neutral[200],
+  },
+  // Loading skeleton styles
+  statsLoadingContainer: {
+    paddingHorizontal: responsiveSpacing(PADDING.screenLarge),
+  },
+  statCardSkeleton: {
+    backgroundColor: COLORS.neutral[100],
+  },
+  skeletonLine: {
+    height: responsiveScale(12),
+    backgroundColor: COLORS.neutral[200],
+    borderRadius: responsiveScale(4),
+    marginBottom: responsiveSpacing(SPACING.xs),
+  },
+  skeletonLineLarge: {
+    height: responsiveScale(24),
+    marginBottom: responsiveSpacing(SPACING.sm),
+  },
+  skeletonLineSmall: {
+    height: responsiveScale(10),
+    width: "60%",
+  },
+  sectionLoadingContainer: {
+    gap: responsiveSpacing(SPACING.md),
+  },
+  taskCardSkeleton: {
+    backgroundColor: COLORS.neutral[100],
+    minHeight: responsiveScale(80),
+  },
+  activityDotSkeleton: {
+    backgroundColor: COLORS.neutral[200],
+  },
+  activityContentSkeleton: {
+    backgroundColor: COLORS.neutral[100],
+  },
+  emptyStateContainer: {
+    paddingVertical: responsiveSpacing(SPACING.lg),
+    alignItems: "center",
+  },
+  priorityLow: {
+    backgroundColor: COLORS.primary[300],
+  },
+  errorContainer: {
+    paddingVertical: responsiveSpacing(SPACING.lg),
+    paddingHorizontal: responsiveSpacing(SPACING.md),
+    alignItems: "center",
+    backgroundColor: COLORS.error[50],
+    borderRadius: responsiveScale(12),
+    marginVertical: responsiveSpacing(SPACING.sm),
   },
 });

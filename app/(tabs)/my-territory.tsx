@@ -22,6 +22,7 @@ import {
 import { Text, H2, H3, Body1, Body2 } from "@/components/ui";
 import { Button } from "@/components/ui";
 import { AppHeader } from "@/components/ui";
+import { Ionicons } from "@expo/vector-icons";
 
 interface AgentTerritory {
   _id: string;
@@ -82,11 +83,22 @@ function MyTerritoryScreen() {
     refetchOnWindowFocus: false,
   });
 
-  // Ensure territories is always an array
+  // Ensure territories is always an array and sort by latest first
   const territories: AgentTerritory[] = Array.isArray(
     territoriesData?.data?.territories
   )
-    ? territoriesData.data.territories
+    ? [...territoriesData.data.territories].sort((a, b) => {
+        // Sort by updatedAt first (most recently updated), then by createdAt
+        const dateA = a.updatedAt || a.createdAt;
+        const dateB = b.updatedAt || b.createdAt;
+        if (!dateA && !dateB) return 0;
+        if (!dateA) return 1; // Put items without date at the end
+        if (!dateB) return -1;
+        const timeA = new Date(dateA).getTime();
+        const timeB = new Date(dateB).getTime();
+        if (isNaN(timeA) || isNaN(timeB)) return 0;
+        return timeB - timeA; // Descending order (newest first)
+      })
     : [];
 
   const summary = territoriesData?.data?.summary || {
@@ -124,7 +136,7 @@ function MyTerritoryScreen() {
     return territory.createdBy === userId;
   };
 
-  // Filter territories based on search term
+  // Filter territories (already sorted by latest first)
   const filteredTerritories = territories.filter(
     (territory) =>
       territory.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -232,6 +244,24 @@ function MyTerritoryScreen() {
               onChangeText={setSearchTerm}
             />
           </View>
+        </View>
+
+        {/* Create Zone Button */}
+        <View style={styles.createZoneContainer}>
+          <Button
+            variant="primary"
+            size="medium"
+            title="Create Zone"
+            onPress={() => router.push("/create-zone")}
+            containerStyle={styles.createZoneButton}
+            leftIcon={
+              <Ionicons
+                name="add"
+                size={responsiveScale(20)}
+                color={COLORS.white}
+              />
+            }
+          />
         </View>
 
         {/* Territories List */}
@@ -546,6 +576,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: responsiveSpacing(PADDING.screenLarge),
     paddingTop: responsiveSpacing(SPACING.md),
     paddingBottom: responsiveSpacing(SPACING.sm),
+  },
+  createZoneContainer: {
+    paddingHorizontal: responsiveSpacing(PADDING.screenLarge),
+    paddingBottom: responsiveSpacing(SPACING.md),
+  },
+  createZoneButton: {
+    width: "100%",
   },
   searchInputContainer: {
     flexDirection: "row",

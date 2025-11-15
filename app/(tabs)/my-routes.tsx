@@ -39,8 +39,10 @@ import {
   RouteStatus,
   useCreateRoute,
   useDeleteRoute,
+  useUpdateRoute,
   RouteDetails,
   CreateRouteRequest,
+  UpdateRouteRequest,
 } from "@/lib/routeApi";
 import { getGoogleMapsApiKey } from "@/lib/googleMaps";
 import {
@@ -218,6 +220,8 @@ export default function MyRoutesScreen(): React.JSX.Element {
   } = useMyRoutes({});
   const createRouteMutation = useCreateRoute();
   const deleteRouteMutation = useDeleteRoute();
+  const updateRouteMutation = useUpdateRoute();
+  const [editingRoute, setEditingRoute] = useState<AgentRoute | null>(null);
 
   const routes = useMemo<AgentRoute[]>(() => {
     if (!data?.routes) {
@@ -262,6 +266,7 @@ export default function MyRoutesScreen(): React.JSX.Element {
     setPlannerTotalDistance(0);
     setPlannerTotalDuration(0);
     setPlannerRouteDetails(null);
+    setEditingRoute(null);
   }, []);
 
   const handleAddAddress = useCallback(() => {
@@ -795,8 +800,8 @@ export default function MyRoutesScreen(): React.JSX.Element {
       const payload: CreateRouteRequest = {
         name: plannerName.trim(),
         description: plannerDescription.trim() || undefined,
-        date: new Date().toISOString(),
-        priority: "MEDIUM",
+        date: editingRoute?.date || new Date().toISOString(),
+        priority: editingRoute?.priority || "MEDIUM",
         startLocation: {
           address: startAddressResolved,
           coordinates: startCoords,
@@ -820,30 +825,50 @@ export default function MyRoutesScreen(): React.JSX.Element {
         },
         analytics: {
           totalStops: stops.length,
-          completedStops: 0,
-          skippedStops: 0,
+          completedStops: editingRoute?.analytics?.completedStops || 0,
+          skippedStops: editingRoute?.analytics?.skippedStops || 0,
           totalDistance: kilometersToMiles(plannerTotalDistance),
           estimatedDuration: plannerTotalDuration,
-          efficiency: 0,
-          completionRate: 0,
+          efficiency: editingRoute?.analytics?.efficiency || 0,
+          completionRate: editingRoute?.analytics?.completionRate || 0,
         },
         routeDetails: plannerRouteDetails,
       };
 
-      console.log("[RouteSave] Sending route data to backend:", {
-        name: payload.name,
-        stopsCount: payload.stops?.length,
-        totalDistance: payload.totalDistance,
-        totalDuration: payload.totalDuration,
-        optimizationSettings: payload.optimizationSettings,
-        hasRouteDetails: !!payload.routeDetails,
-        routeDetailsAlternativesCount:
-          payload.routeDetails?.alternatives?.length,
-      });
+      console.log(
+        editingRoute
+          ? "[RouteUpdate] Updating route data to backend:"
+          : "[RouteSave] Sending route data to backend:",
+        {
+          name: payload.name,
+          stopsCount: payload.stops?.length,
+          totalDistance: payload.totalDistance,
+          totalDuration: payload.totalDuration,
+          optimizationSettings: payload.optimizationSettings,
+          hasRouteDetails: !!payload.routeDetails,
+          routeDetailsAlternativesCount:
+            payload.routeDetails?.alternatives?.length,
+        }
+      );
 
-      await createRouteMutation.mutateAsync(payload);
-
-      Alert.alert("Route saved", `Route "${payload.name}" saved successfully.`);
+      if (editingRoute) {
+        // Update existing route
+        await updateRouteMutation.mutateAsync({
+          id: editingRoute._id,
+          payload: payload as UpdateRouteRequest,
+        });
+        Alert.alert(
+          "Route updated",
+          `Route "${payload.name}" updated successfully.`
+        );
+      } else {
+        // Create new route
+        await createRouteMutation.mutateAsync(payload);
+        Alert.alert(
+          "Route saved",
+          `Route "${payload.name}" saved successfully.`
+        );
+      }
 
       resetPlanner();
       setViewMode("routes");
@@ -855,6 +880,8 @@ export default function MyRoutesScreen(): React.JSX.Element {
     }
   }, [
     createRouteMutation,
+    updateRouteMutation,
+    editingRoute,
     plannerAlternatives,
     plannerName,
     plannerDescription,
@@ -1058,8 +1085,65 @@ export default function MyRoutesScreen(): React.JSX.Element {
   }, []);
 
   const handleEditRoute = useCallback((route: AgentRoute) => {
-    // TODO: Implement edit route functionality
-    Alert.alert("Edit Route", "Edit functionality coming soon");
+    console.log("[EditRoute] Loading route data:", route);
+
+    // Reconstruct addresses from route data
+    const addresses: string[] = [];
+
+    // Add start location
+    if (route.startLocation?.address) {
+      addresses.push(route.startLocation.address);
+    }
+
+    // Add all stops (middle addresses)
+    if (route.stops?.length > 0) {
+      route.stops.forEach((stop) => {
+        const address = stop.address || stop.notes || "";
+        if (address && address.trim() && !addresses.includes(address)) {
+          addresses.push(address);
+        }
+      });
+    }
+
+    // Add end location if different from start
+    if (
+      route.endLocation?.address &&
+      route.endLocation.address !== route.startLocation?.address
+    ) {
+      addresses.push(route.endLocation.address);
+    }
+
+    // If no addresses found, use empty array with one empty string
+    const finalAddresses = addresses.length > 0 ? addresses : [""];
+
+    // Determine transportation mode (default to driving if not stored)
+    // Note: Route model doesn't store mode, so we default to driving
+    const mode: "driving" | "walking" | "bicycling" | "transit" = "driving";
+
+    // Load optimization settings
+    const optimization: PlannerOptimizationState = {
+      fastestRoute: route.optimizationSettings?.optimizationType === "FASTEST",
+      avoidFerries: route.optimizationSettings?.avoidFerries || false,
+      avoidHighways: route.optimizationSettings?.avoidHighways || false,
+      avoidTolls: route.optimizationSettings?.avoidTolls || false,
+    };
+
+    // Populate form fields
+    setPlannerName(route.name || "");
+    setPlannerDescription(route.description || "");
+    setPlannerMode(mode);
+    setPlannerAddresses(finalAddresses);
+    setPlannerOptimization(optimization);
+
+    // Set editing route
+    setEditingRoute(route);
+
+    // If route has routeDetails, we could display it on map
+    // For now, just switch to planner view
+    setViewMode("planner");
+
+    // Scroll to top of planner (if needed)
+    // The viewMode change will show the planner
   }, []);
 
   const handleDeleteRoute = useCallback(
@@ -1600,10 +1684,15 @@ export default function MyRoutesScreen(): React.JSX.Element {
             keyboardVerticalOffset={Platform.OS === "ios" ? 88 : 0}
           >
             <View style={styles.plannerIntro}>
-              <H3 style={styles.plannerTitle}>Create new route</H3>
+              <H3 style={styles.plannerTitle}>
+                {editingRoute
+                  ? `Edit Route: ${editingRoute.name}`
+                  : "Create new route"}
+              </H3>
               <Body3 color={COLORS.text.secondary} align="center">
-                Enter stops, tweak preferences, and preview the trip before
-                saving.
+                {editingRoute
+                  ? "Modify route details, addresses, and preferences."
+                  : "Enter stops, tweak preferences, and preview the trip before saving."}
               </Body3>
             </View>
             <View style={styles.plannerCard}>
@@ -1860,15 +1949,19 @@ export default function MyRoutesScreen(): React.JSX.Element {
                   </View>
                   <View style={styles.plannerActionColumn}>
                     <Button
-                      title="Save Route"
+                      title={editingRoute ? "Update Route" : "Save Route"}
                       size="medium"
                       onPress={handleSaveRoute}
                       disabled={
                         plannerAlternatives.length === 0 ||
                         createRouteMutation.isPending ||
+                        updateRouteMutation.isPending ||
                         plannerIsCalculatingRoute
                       }
-                      loading={createRouteMutation.isPending}
+                      loading={
+                        createRouteMutation.isPending ||
+                        updateRouteMutation.isPending
+                      }
                       fullWidth
                       containerStyle={styles.saveActionButton}
                     />
@@ -1884,10 +1977,15 @@ export default function MyRoutesScreen(): React.JSX.Element {
                   containerStyle={styles.previewActionStandalone}
                 />
                 <Button
-                  title="Clear"
+                  title={editingRoute ? "Cancel Edit" : "Clear"}
                   variant="outline"
                   size="medium"
-                  onPress={resetPlanner}
+                  onPress={() => {
+                    resetPlanner();
+                    if (editingRoute) {
+                      setViewMode("routes");
+                    }
+                  }}
                   fullWidth
                   containerStyle={styles.clearActionButton}
                 />

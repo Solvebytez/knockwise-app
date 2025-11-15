@@ -29,6 +29,7 @@ import MapView, {
 } from "react-native-maps";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Text, H3, Body2, Body3, Button } from "@/components/ui";
 import { useTerritoryStore } from "@/store/territoryStore";
@@ -208,6 +209,7 @@ export default function CreateZoneScreen({
   territoryId: territoryIdProp,
 }: ZoneScreenProps = {}): React.JSX.Element {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const params = useLocalSearchParams<{
     mode?: string;
     territory_id?: string;
@@ -277,6 +279,8 @@ export default function CreateZoneScreen({
   const [residentsInDrawing, setResidentsInDrawing] = useState<Resident[]>([]);
   const [hasStartedEditing, setHasStartedEditing] = useState(false);
   const [isDetectingBuildings, setIsDetectingBuildings] = useState(false);
+  const [isDrawingGuideModalVisible, setIsDrawingGuideModalVisible] =
+    useState(false);
 
   const [mapTypeIndex, setMapTypeIndex] = useState(() =>
     Math.max(0, MAP_TYPE_SEQUENCE.indexOf(mapSettings.mapType))
@@ -1374,22 +1378,11 @@ export default function CreateZoneScreen({
 
       await loadExistingTerritories();
 
-      Alert.alert(
-        isEditMode ? "Territory Updated" : "Territory Created",
-        `Zone "${baseTerritory.name}" has been ${
-          isEditMode ? "updated" : "assigned"
-        } successfully.`,
-        [
-          {
-            text: "View Territories",
-            onPress: () => router.push("/(tabs)/my-territory"),
-          },
-          {
-            text: "Stay",
-            style: "cancel",
-          },
-        ]
-      );
+      // Invalidate territories query to refresh the list with updated data
+      queryClient.invalidateQueries({ queryKey: ["myTerritories"] });
+
+      // Automatically redirect to my territory list screen with updated data
+      router.replace("/(tabs)/my-territory");
     } catch (error: any) {
       console.error("[CreateZone] Failed to save territory:", error);
       Alert.alert(
@@ -1408,6 +1401,7 @@ export default function CreateZoneScreen({
     loadExistingTerritories,
     originalTerritory,
     pendingTerritory,
+    queryClient,
     resetAssignmentState,
     resetDrawingState,
     router,
@@ -1515,6 +1509,17 @@ export default function CreateZoneScreen({
       return updated;
     });
   }, []);
+
+  const handlePointDragEnd = useCallback(
+    (index: number, newCoordinate: MapLatLng) => {
+      setCurrentDrawing((prev) => {
+        const updated = [...prev];
+        updated[index] = newCoordinate;
+        return updated;
+      });
+    },
+    []
+  );
 
   const buildGeoJsonPayload = useCallback((polygon: MapLatLng[]) => {
     const coordinates = polygon.map((point) => [
@@ -1962,9 +1967,13 @@ export default function CreateZoneScreen({
             />
             {currentDrawing.map((point, index) => (
               <Marker
-                key={`${point.latitude}-${point.longitude}-${index}`}
+                key={`drawing-point-${index}`}
                 coordinate={point}
                 pinColor={drawingVertexColor}
+                draggable={isDrawingMode}
+                onDragEnd={(e) =>
+                  handlePointDragEnd(index, e.nativeEvent.coordinate)
+                }
               />
             ))}
           </>
@@ -2293,7 +2302,20 @@ export default function CreateZoneScreen({
           </View>
         ) : workflowStep === "drawing" ? (
           <View style={[styles.stepCard, styles.drawingStepCard]}>
-            <H3 style={styles.stepTitle}>Draw Territory</H3>
+            <View style={styles.stepTitleRow}>
+              <H3 style={styles.stepTitle}>Draw Territory</H3>
+              <TouchableOpacity
+                onPress={() => setIsDrawingGuideModalVisible(true)}
+                style={styles.infoIconButton}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name="information-circle-outline"
+                  size={responsiveScale(20)}
+                  color={COLORS.primary[600]}
+                />
+              </TouchableOpacity>
+            </View>
             <Body2 color={COLORS.text.secondary}>
               Tap the map to place vertices. Complete the loop when ready.
             </Body2>
@@ -2732,6 +2754,152 @@ export default function CreateZoneScreen({
           </View>
         </View>
       </Modal>
+
+      {/* Drawing Guide Modal */}
+      <Modal
+        transparent
+        animationType="slide"
+        visible={isDrawingGuideModalVisible}
+        onRequestClose={() => setIsDrawingGuideModalVisible(false)}
+      >
+        <View style={styles.drawingGuideModalOverlay}>
+          <TouchableOpacity
+            style={styles.locationModalBackdrop}
+            activeOpacity={1}
+            onPress={() => setIsDrawingGuideModalVisible(false)}
+          />
+          <View
+            style={[
+              styles.drawingGuideModalContent,
+              {
+                marginTop: insets.top,
+                paddingTop: responsiveSpacing(SPACING.md),
+                paddingBottom: insets.bottom || responsiveSpacing(SPACING.md),
+              },
+            ]}
+          >
+            <View style={styles.locationModalHeader}>
+              <H3>How to Draw a Territory</H3>
+              <Button
+                variant="ghost"
+                size="small"
+                title="Close"
+                onPress={() => setIsDrawingGuideModalVisible(false)}
+              />
+            </View>
+            <ScrollView
+              style={styles.locationModalScroll}
+              contentContainerStyle={styles.locationModalScrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={styles.guideSection}>
+                <View style={styles.guideStep}>
+                  <View style={styles.guideStepNumber}>
+                    <Text weight="bold" style={styles.guideStepNumberText}>
+                      1
+                    </Text>
+                  </View>
+                  <View style={styles.guideStepContent}>
+                    <Body2 weight="semiBold" style={styles.guideStepTitle}>
+                      Start Drawing
+                    </Body2>
+                    <Body3 color={COLORS.text.secondary}>
+                      Tap the "Start Drawing" button to begin placing points on
+                      the map.
+                    </Body3>
+                  </View>
+                </View>
+
+                <View style={styles.guideStep}>
+                  <View style={styles.guideStepNumber}>
+                    <Text weight="bold" style={styles.guideStepNumberText}>
+                      2
+                    </Text>
+                  </View>
+                  <View style={styles.guideStepContent}>
+                    <Body2 weight="semiBold" style={styles.guideStepTitle}>
+                      Place Points
+                    </Body2>
+                    <Body3 color={COLORS.text.secondary}>
+                      Tap anywhere on the map to place vertices. You need at
+                      least 3 points to create a territory. The polygon will
+                      automatically close from the last point to the first.
+                    </Body3>
+                  </View>
+                </View>
+
+                <View style={styles.guideStep}>
+                  <View style={styles.guideStepNumber}>
+                    <Text weight="bold" style={styles.guideStepNumberText}>
+                      3
+                    </Text>
+                  </View>
+                  <View style={styles.guideStepContent}>
+                    <Body2 weight="semiBold" style={styles.guideStepTitle}>
+                      Adjust Points
+                    </Body2>
+                    <Body3 color={COLORS.text.secondary}>
+                      Long-press and drag any blue marker to move it to a better
+                      position. This helps you fix the polygon shape if it looks
+                      distorted.
+                    </Body3>
+                  </View>
+                </View>
+
+                <View style={styles.guideStep}>
+                  <View style={styles.guideStepNumber}>
+                    <Text weight="bold" style={styles.guideStepNumberText}>
+                      4
+                    </Text>
+                  </View>
+                  <View style={styles.guideStepContent}>
+                    <Body2 weight="semiBold" style={styles.guideStepTitle}>
+                      Undo if Needed
+                    </Body2>
+                    <Body3 color={COLORS.text.secondary}>
+                      Use the "Undo Last" button to remove the most recently
+                      placed point if you make a mistake.
+                    </Body3>
+                  </View>
+                </View>
+
+                <View style={styles.guideStep}>
+                  <View style={styles.guideStepNumber}>
+                    <Text weight="bold" style={styles.guideStepNumberText}>
+                      5
+                    </Text>
+                  </View>
+                  <View style={styles.guideStepContent}>
+                    <Body2 weight="semiBold" style={styles.guideStepTitle}>
+                      Complete Shape
+                    </Body2>
+                    <Body3 color={COLORS.text.secondary}>
+                      Once you're satisfied with the polygon shape, tap "Complete
+                      Shape" to validate and detect buildings within the
+                      territory.
+                    </Body3>
+                  </View>
+                </View>
+
+                <View style={styles.guideTip}>
+                  <Ionicons
+                    name="bulb-outline"
+                    size={responsiveScale(20)}
+                    color={COLORS.warning[600]}
+                    style={styles.guideTipIcon}
+                  />
+                  <Body3 color={COLORS.text.secondary}>
+                    <Text weight="semiBold">Tip: </Text>
+                    Draw the polygon in a clockwise or counter-clockwise order
+                    around the area you want to cover. Avoid placing points that
+                    create crossing lines.
+                  </Body3>
+                </View>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -2957,6 +3125,19 @@ const styles = StyleSheet.create({
     gap: responsiveSpacing(SPACING.md),
     paddingBottom: responsiveSpacing(SPACING.md),
   },
+  drawingGuideModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(15, 23, 42, 0.45)",
+    justifyContent: "flex-end",
+  },
+  drawingGuideModalContent: {
+    backgroundColor: COLORS.background.primary,
+    borderTopLeftRadius: responsiveScale(20),
+    borderTopRightRadius: responsiveScale(20),
+    paddingHorizontal: responsiveSpacing(SPACING.md),
+    gap: responsiveSpacing(SPACING.md),
+    maxHeight: "90%",
+  },
   bottomSheet: {
     position: "absolute",
     bottom: 0,
@@ -2994,8 +3175,8 @@ const styles = StyleSheet.create({
     marginBottom: responsiveSpacing(SPACING.sm),
   },
   stepTitle: {
-    marginBottom: responsiveSpacing(SPACING.xs),
-    paddingTop: responsiveSpacing(SPACING.md),
+    marginBottom: 0,
+    flex: 1,
   },
   reviewTitle: {
     paddingTop: responsiveSpacing(SPACING.md),
@@ -3164,5 +3345,60 @@ const styles = StyleSheet.create({
     textAlign: "right",
     color: COLORS.text.secondary,
     fontSize: responsiveScale(11),
+  },
+  stepTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: responsiveSpacing(SPACING.xs),
+    paddingTop: responsiveSpacing(SPACING.md),
+  },
+  infoIconButton: {
+    padding: responsiveSpacing(SPACING.xs),
+    marginLeft: responsiveSpacing(SPACING.xs),
+  },
+  guideSection: {
+    gap: responsiveSpacing(SPACING.md),
+    paddingTop: responsiveSpacing(SPACING.sm),
+  },
+  guideStep: {
+    flexDirection: "row",
+    gap: responsiveSpacing(SPACING.md),
+    alignItems: "flex-start",
+  },
+  guideStepNumber: {
+    width: responsiveScale(32),
+    height: responsiveScale(32),
+    borderRadius: responsiveScale(16),
+    backgroundColor: COLORS.primary[100],
+    justifyContent: "center",
+    alignItems: "center",
+    flexShrink: 0,
+  },
+  guideStepNumberText: {
+    fontSize: responsiveScale(16),
+    color: COLORS.primary[600],
+  },
+  guideStepContent: {
+    flex: 1,
+    gap: responsiveSpacing(SPACING.xs / 2),
+  },
+  guideStepTitle: {
+    marginBottom: responsiveSpacing(SPACING.xs / 2),
+  },
+  guideTip: {
+    flexDirection: "row",
+    gap: responsiveSpacing(SPACING.sm),
+    padding: responsiveSpacing(SPACING.md),
+    backgroundColor: COLORS.warning[50],
+    borderRadius: responsiveScale(12),
+    borderWidth: 1,
+    borderColor: COLORS.warning[100],
+    marginTop: responsiveSpacing(SPACING.sm),
+    alignItems: "flex-start",
+  },
+  guideTipIcon: {
+    marginTop: responsiveScale(2),
+    flexShrink: 0,
   },
 });

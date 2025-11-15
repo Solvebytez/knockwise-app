@@ -137,66 +137,73 @@ const fetchBuildingsFromOSM = async (
     out center;
   `;
 
-  const response = await withRetries(
-    () =>
-      fetch(`${OVERPASS_ENDPOINT}?data=${encodeURIComponent(query)}`),
-    { attempts: 3, initialDelayMs: 800 }
-  );
-  if (!response.ok) {
-    throw new Error("Failed to contact OpenStreetMap Overpass API");
-  }
-  const data = await response.json();
-  if (!Array.isArray(data?.elements)) {
+  try {
+    const response = await withRetries(
+      () =>
+        fetch(`${OVERPASS_ENDPOINT}?data=${encodeURIComponent(query)}`),
+      { attempts: 3, initialDelayMs: 800 }
+    );
+    if (!response.ok) {
+      // Return empty array instead of throwing - this is a non-critical failure
+      return [];
+    }
+    const data = await response.json();
+    if (!Array.isArray(data?.elements)) {
+      return [];
+    }
+
+    const candidates: Array<{ id: string; latitude: number; longitude: number }> =
+      [];
+
+    data.elements.forEach((element: any) => {
+      if (!element) {
+        return;
+      }
+      let latitude: number | undefined;
+      let longitude: number | undefined;
+
+      if (typeof element.lat === "number" && typeof element.lon === "number") {
+        latitude = element.lat;
+        longitude = element.lon;
+      } else if (
+        typeof element.center?.lat === "number" &&
+        typeof element.center?.lon === "number"
+      ) {
+        latitude = element.center.lat;
+        longitude = element.center.lon;
+      } else if (
+        Array.isArray(element.geometry) &&
+        element.geometry.length > 0 &&
+        typeof element.geometry[0]?.lat === "number" &&
+        typeof element.geometry[0]?.lon === "number"
+      ) {
+        latitude = element.geometry[0].lat;
+        longitude = element.geometry[0].lon;
+      }
+
+      if (
+        typeof latitude === "number" &&
+        Number.isFinite(latitude) &&
+        typeof longitude === "number" &&
+        Number.isFinite(longitude)
+      ) {
+        const point = { latitude, longitude };
+        if (isPointInPolygon(point, polygon)) {
+          candidates.push({
+            id: String(element.id),
+            latitude,
+            longitude,
+          });
+        }
+      }
+    });
+
+    return candidates;
+  } catch (error) {
+    // OSM API failure is non-critical - return empty array and let the function continue
+    // with simulated buildings if needed
     return [];
   }
-
-  const candidates: Array<{ id: string; latitude: number; longitude: number }> =
-    [];
-
-  data.elements.forEach((element: any) => {
-    if (!element) {
-      return;
-    }
-    let latitude: number | undefined;
-    let longitude: number | undefined;
-
-    if (typeof element.lat === "number" && typeof element.lon === "number") {
-      latitude = element.lat;
-      longitude = element.lon;
-    } else if (
-      typeof element.center?.lat === "number" &&
-      typeof element.center?.lon === "number"
-    ) {
-      latitude = element.center.lat;
-      longitude = element.center.lon;
-    } else if (
-      Array.isArray(element.geometry) &&
-      element.geometry.length > 0 &&
-      typeof element.geometry[0]?.lat === "number" &&
-      typeof element.geometry[0]?.lon === "number"
-    ) {
-      latitude = element.geometry[0].lat;
-      longitude = element.geometry[0].lon;
-    }
-
-    if (
-      typeof latitude === "number" &&
-      Number.isFinite(latitude) &&
-      typeof longitude === "number" &&
-      Number.isFinite(longitude)
-    ) {
-      const point = { latitude, longitude };
-      if (isPointInPolygon(point, polygon)) {
-        candidates.push({
-          id: String(element.id),
-          latitude,
-          longitude,
-        });
-      }
-    }
-  });
-
-  return candidates;
 };
 
 const reverseGeocode = async (
@@ -266,17 +273,27 @@ export const detectBuildingsForPolygon = async (
   }
 
   const warnings: string[] = [];
+  const area = calculatePolygonArea(polygon);
+  const targetCount = Math.max(3, Math.min(50, Math.round(area / 400)));
+  const boundingBox = getBoundingBox(polygon);
+  let detectedBuildings: DetectedBuilding[] = [];
 
+  // 1️⃣ Try to fetch real buildings from OSM (non-blocking - continue even if it fails)
+  let osmBuildings: Array<{ id: string; latitude: number; longitude: number }> = [];
   try {
-    const area = calculatePolygonArea(polygon);
-    const targetCount = Math.max(3, Math.min(50, Math.round(area / 400)));
-    const boundingBox = getBoundingBox(polygon);
+    osmBuildings = await fetchBuildingsFromOSM(polygon, boundingBox);
+  } catch (error) {
+    // OSM failure is non-critical - continue with simulated buildings
+    const errorMessage = (error as Error)?.message || String(error);
+    if (!errorMessage.includes("OpenStreetMap") && !errorMessage.includes("Overpass")) {
+      console.warn("[detectBuildings] Unexpected error fetching OSM:", error);
+    }
+  }
 
-    const osmBuildings = await fetchBuildingsFromOSM(polygon, boundingBox);
-    let detectedBuildings: DetectedBuilding[] = [];
-
-    for (let i = 0; i < osmBuildings.length; i += 1) {
-      const building = osmBuildings[i];
+  // 2️⃣ Process real OSM buildings and geocode them
+  for (let i = 0; i < osmBuildings.length; i += 1) {
+    const building = osmBuildings[i];
+    try {
       const geocodeResult = await reverseGeocode(
         building.latitude,
         building.longitude
@@ -295,41 +312,49 @@ export const detectBuildingsForPolygon = async (
       if (detectedBuildings.length >= targetCount) {
         break;
       }
+    } catch (error) {
+      // Skip this building if geocoding fails, continue with others
+      console.warn(`[detectBuildings] Failed to geocode building ${i + 1}:`, error);
+    }
+  }
+
+  // 3️⃣ Always generate simulated buildings to fill gaps (even if OSM failed completely)
+  if (detectedBuildings.length < targetCount) {
+    const missing = targetCount - detectedBuildings.length;
+    let simulatedCount = 0;
+    
+    for (let i = 0; i < missing; i += 1) {
+      const randomPoint = generateRandomPointInPolygon(polygon, boundingBox);
+      if (!randomPoint) {
+        break;
+      }
+      detectedBuildings.push({
+        id: `sim-${Date.now()}-${i}`,
+        latitude: randomPoint.latitude,
+        longitude: randomPoint.longitude,
+        address: `Simulated building near ${randomPoint.latitude.toFixed(
+          6
+        )}, ${randomPoint.longitude.toFixed(6)}`,
+        source: "simulated",
+      });
+      simulatedCount += 1;
     }
 
-    if (detectedBuildings.length < targetCount) {
-      const missing = targetCount - detectedBuildings.length;
-      for (let i = 0; i < missing; i += 1) {
-        const randomPoint = generateRandomPointInPolygon(polygon, boundingBox);
-        if (!randomPoint) {
-          break;
-        }
-        detectedBuildings.push({
-          id: `sim-${Date.now()}-${i}`,
-          latitude: randomPoint.latitude,
-          longitude: randomPoint.longitude,
-          address: `Simulated building near ${randomPoint.latitude.toFixed(
-            6
-          )}, ${randomPoint.longitude.toFixed(6)}`,
-          source: "simulated",
-        });
-      }
-
-      if (missing > 0) {
+    if (simulatedCount > 0) {
+      if (osmBuildings.length === 0) {
+        warnings.push(
+          "Unable to fetch real building data. Generated simulated buildings to approximate the area."
+        );
+      } else {
         warnings.push(
           "Limited real building data available. Added simulated buildings to approximate the area."
         );
       }
     }
-
-    return { buildings: detectedBuildings, warnings };
-  } catch (error) {
-    console.error("[detectBuildings] Failed to detect buildings:", error);
-    warnings.push(
-      "Unable to fetch building data right now. You can still save this territory."
-    );
-    return { buildings: [], warnings };
   }
+
+  // 4️⃣ Always return buildings (real + simulated), never empty
+  return { buildings: detectedBuildings, warnings };
 };
 
 
