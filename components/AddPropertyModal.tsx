@@ -24,6 +24,7 @@ import { Text } from "@/components/ui";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import DateTimePickerModal from "react-native-modal-datetime-picker";
+import { getGoogleMapsApiKey } from "@/lib/googleMaps";
 
 interface Property {
   _id: string;
@@ -229,6 +230,46 @@ const AddPropertyModal = React.forwardRef<
     await handleAddAddressSearchForSuggestion(suggestion.description);
   };
 
+  // Helper function to geocode address using Google Geocoding API (bypasses location permission)
+  const geocodeAddressWithPlaces = async (address: string) => {
+    const apiKey = getGoogleMapsApiKey();
+    if (!apiKey) {
+      throw new Error("Google Maps API key not configured");
+    }
+
+    const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`;
+    const response = await fetch(geocodeUrl);
+    const data = await response.json();
+
+    if (data.status !== "OK" || !data.results || data.results.length === 0) {
+      return null;
+    }
+
+    const result = data.results[0];
+    const location = result.geometry.location;
+    const addressComponents = result.address_components || [];
+
+    // Extract address components
+    const getComponent = (type: string) => {
+      const component = addressComponents.find((comp: any) =>
+        comp.types.includes(type)
+      );
+      return component?.long_name || "";
+    };
+
+    return {
+      latitude: location.lat,
+      longitude: location.lng,
+      formattedAddress: result.formatted_address,
+      streetNumber: getComponent("street_number"),
+      street: getComponent("route"),
+      city: getComponent("locality") || getComponent("administrative_area_level_2"),
+      region: getComponent("administrative_area_level_1"),
+      postalCode: getComponent("postal_code"),
+      country: getComponent("country"),
+    };
+  };
+
   // Handle address search for selected suggestion
   const handleAddAddressSearchForSuggestion = async (address: string) => {
     if (!address.trim()) {
@@ -237,38 +278,35 @@ const AddPropertyModal = React.forwardRef<
 
     try {
       setIsAddValidating(true);
-      const geocodeResult = await Location.geocodeAsync(address);
+      const geocodeData = await geocodeAddressWithPlaces(address);
 
-      if (geocodeResult && geocodeResult.length > 0) {
-        const location = geocodeResult[0];
-        const lat = location.latitude;
-        const lng = location.longitude;
+      if (geocodeData) {
+        const { latitude: lat, longitude: lng, formattedAddress, streetNumber, street, city, region, postalCode, country } = geocodeData;
 
-        const loc = location as any;
         const formattedAddressParts = [
-          loc.streetNumber,
-          loc.street,
-          loc.city,
-          loc.region,
-          loc.postalCode,
-          loc.country,
+          streetNumber,
+          street,
+          city,
+          region,
+          postalCode,
+          country,
         ].filter(Boolean);
 
-        const formattedAddress =
+        const finalFormattedAddress =
           formattedAddressParts.length > 0
             ? formattedAddressParts.join(", ")
-            : address || `${lat}, ${lng}`;
+            : formattedAddress || address || `${lat}, ${lng}`;
 
         const houseNumber =
-          loc.streetNumber ||
-          formattedAddress.match(/^(\d+)/)?.[1] ||
+          streetNumber ||
+          finalFormattedAddress.match(/^(\d+)/)?.[1] ||
           addFormData.houseNumber;
 
         setAddFormData((prev) => ({
           ...prev,
           latitude: lat.toString(),
           longitude: lng.toString(),
-          address: formattedAddress || prev.address,
+          address: finalFormattedAddress || prev.address,
           houseNumber: houseNumber || prev.houseNumber,
         }));
       }
@@ -288,38 +326,35 @@ const AddPropertyModal = React.forwardRef<
 
     try {
       setIsAddValidating(true);
-      const geocodeResult = await Location.geocodeAsync(addFormData.address);
+      const geocodeData = await geocodeAddressWithPlaces(addFormData.address);
 
-      if (geocodeResult && geocodeResult.length > 0) {
-        const location = geocodeResult[0];
-        const lat = location.latitude;
-        const lng = location.longitude;
+      if (geocodeData) {
+        const { latitude: lat, longitude: lng, formattedAddress, streetNumber, street, city, region, postalCode, country } = geocodeData;
 
-        const loc = location as any;
         const formattedAddressParts = [
-          loc.streetNumber,
-          loc.street,
-          loc.city,
-          loc.region,
-          loc.postalCode,
-          loc.country,
+          streetNumber,
+          street,
+          city,
+          region,
+          postalCode,
+          country,
         ].filter(Boolean);
 
-        const formattedAddress =
+        const finalFormattedAddress =
           formattedAddressParts.length > 0
             ? formattedAddressParts.join(", ")
-            : addFormData.address || `${lat}, ${lng}`;
+            : formattedAddress || addFormData.address || `${lat}, ${lng}`;
 
         const houseNumber =
-          loc.streetNumber ||
-          formattedAddress.match(/^(\d+)/)?.[1] ||
+          streetNumber ||
+          finalFormattedAddress.match(/^(\d+)/)?.[1] ||
           addFormData.houseNumber;
 
         setAddFormData((prev) => ({
           ...prev,
           latitude: lat.toString(),
           longitude: lng.toString(),
-          address: formattedAddress || prev.address,
+          address: finalFormattedAddress || prev.address,
           houseNumber: houseNumber || prev.houseNumber,
         }));
 

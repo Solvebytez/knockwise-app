@@ -47,9 +47,31 @@ import AddPropertyModal, {
 } from "@/components/AddPropertyModal";
 import * as FileSystem from "expo-file-system/legacy";
 import * as XLSX from "xlsx";
+import { getGoogleMapsApiKey } from "@/lib/googleMaps";
 
 // Lazy load expo-sharing to avoid native module errors on startup
 // We'll import it dynamically when needed
+
+// Geocode an address using Google Geocoding API to avoid OS location permission
+const geocodeAddressWithPlaces = async (address: string) => {
+  const apiKey = getGoogleMapsApiKey();
+  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
+    address
+  )}&key=${apiKey}`;
+  const response = await fetch(url);
+  const data = await response.json();
+  if (data.status !== "OK" || !data.results || data.results.length === 0) {
+    throw new Error(`Geocoding failed with status: ${data.status}`);
+  }
+  const result = data.results[0];
+  const { lat, lng } = result.geometry.location;
+  const formattedAddress: string = result.formatted_address;
+  const streetNumber =
+    result.address_components?.find((c: any) =>
+      (c.types || []).includes("street_number")
+    )?.long_name || "";
+  return { lat, lng, formattedAddress, streetNumber };
+};
 
 interface Territory {
   _id: string;
@@ -934,47 +956,25 @@ export default function TerritoryMapViewScreen() {
       setIsEditValidating(true);
       console.log("🔍 Finding exact coordinates for address:", address);
 
-      // Use expo-location geocoding to convert address to coordinates
-      const geocodeResult = await Location.geocodeAsync(address);
+      // Use Google Geocoding API to convert address to coordinates (no OS permission needed)
+      const { lat, lng, formattedAddress, streetNumber } =
+        await geocodeAddressWithPlaces(address);
 
-      if (geocodeResult && geocodeResult.length > 0) {
-        const location = geocodeResult[0];
-        const lat = location.latitude;
-        const lng = location.longitude;
+      const houseNumber =
+        streetNumber ||
+        formattedAddress.match(/^(\d+)/)?.[1] ||
+        editFormData.houseNumber;
 
-        // Format address from geocoding result (expo-location structure)
-        const loc = location as any;
-        const formattedAddressParts = [
-          loc.streetNumber,
-          loc.street,
-          loc.city,
-          loc.region,
-          loc.postalCode,
-          loc.country,
-        ].filter(Boolean);
+      // Update form with exact coordinates and formatted address
+      setEditFormData((prev) => ({
+        ...prev,
+        latitude: lat.toString(),
+        longitude: lng.toString(),
+        address: formattedAddress || prev.address,
+        houseNumber: houseNumber || prev.houseNumber,
+      }));
 
-        const formattedAddress =
-          formattedAddressParts.length > 0
-            ? formattedAddressParts.join(", ")
-            : address || `${lat}, ${lng}`;
-
-        // Extract house number from location data or formatted address
-        const houseNumber =
-          loc.streetNumber ||
-          formattedAddress.match(/^(\d+)/)?.[1] ||
-          editFormData.houseNumber;
-
-        // Update form with exact coordinates and formatted address
-        setEditFormData((prev) => ({
-          ...prev,
-          latitude: lat.toString(),
-          longitude: lng.toString(),
-          address: formattedAddress || prev.address,
-          houseNumber: houseNumber || prev.houseNumber,
-        }));
-
-        console.log("✅ Exact coordinates found:", lat, lng);
-      }
+      console.log("✅ Exact coordinates found:", lat, lng);
     } catch (error) {
       console.error("❌ Error finding exact coordinates:", error);
     } finally {
@@ -997,66 +997,34 @@ export default function TerritoryMapViewScreen() {
         editFormData.address
       );
 
-      // Use expo-location geocoding to convert address to coordinates
-      const geocodeResult = await Location.geocodeAsync(editFormData.address);
+      // Use Google Geocoding API to convert address to coordinates (no OS permission needed)
+      const { lat, lng, formattedAddress, streetNumber } =
+        await geocodeAddressWithPlaces(editFormData.address);
 
-      if (geocodeResult && geocodeResult.length > 0) {
-        const location = geocodeResult[0];
-        const lat = location.latitude;
-        const lng = location.longitude;
+      console.log("🎯 Geocoding Results:");
+      console.log("📍 Original Address:", editFormData.address);
+      console.log("📍 Formatted Address:", formattedAddress);
+      console.log("📍 Coordinates:", lat, lng);
 
-        // Format address from geocoding result (expo-location structure)
-        // expo-location returns properties like: streetNumber, street, city, region, postalCode, country
-        // Using type assertion since TypeScript types may not include all properties
-        const loc = location as any;
-        const formattedAddressParts = [
-          loc.streetNumber,
-          loc.street,
-          loc.city,
-          loc.region,
-          loc.postalCode,
-          loc.country,
-        ].filter(Boolean);
+      const houseNumber =
+        streetNumber ||
+        formattedAddress.match(/^(\d+)/)?.[1] ||
+        editFormData.houseNumber;
 
-        // If no formatted parts, use original address or create from coordinates
-        const formattedAddress =
-          formattedAddressParts.length > 0
-            ? formattedAddressParts.join(", ")
-            : editFormData.address || `${lat}, ${lng}`;
+      // Update form with exact coordinates and formatted address (matching web)
+      setEditFormData((prev) => ({
+        ...prev,
+        latitude: lat.toString(),
+        longitude: lng.toString(),
+        address: formattedAddress || prev.address, // Update with formatted address
+        houseNumber: houseNumber || prev.houseNumber,
+      }));
 
-        console.log("🎯 Geocoding Results:");
-        console.log("📍 Original Address:", editFormData.address);
-        console.log("📍 Formatted Address:", formattedAddress);
-        console.log("📍 Coordinates:", lat, lng);
-        console.log(
-          "📍 Full location data:",
-          JSON.stringify(location, null, 2)
-        );
-
-        // Extract house number from location data or formatted address
-        const houseNumber =
-          loc.streetNumber ||
-          formattedAddress.match(/^(\d+)/)?.[1] ||
-          editFormData.houseNumber;
-
-        // Update form with exact coordinates and formatted address (matching web)
-        setEditFormData((prev) => ({
-          ...prev,
-          latitude: lat.toString(),
-          longitude: lng.toString(),
-          address: formattedAddress || prev.address, // Update with formatted address
-          houseNumber: houseNumber || prev.houseNumber,
-        }));
-
-        console.log("✅ Exact coordinates found:", lat, lng);
-        Alert.alert(
-          "Success",
-          `Coordinates found: ${lat.toFixed(6)}, ${lng.toFixed(6)}`
-        );
-      } else {
-        console.error("❌ No location data found for this address");
-        Alert.alert("Error", "No location data found for this address");
-      }
+      console.log("✅ Exact coordinates found:", lat, lng);
+      Alert.alert(
+        "Success",
+        `Coordinates found: ${lat.toFixed(6)}, ${lng.toFixed(6)}`
+      );
     } catch (error) {
       console.error("❌ Error finding exact coordinates:", error);
       Alert.alert(

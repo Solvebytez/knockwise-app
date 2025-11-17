@@ -9,7 +9,7 @@ export type VisitResponse =
   | "FOLLOW_UP"
   | "LEAD_CREATED";
 
-export type ActivityType = "VISIT" | "ZONE_OPERATION" | "PROPERTY_OPERATION";
+export type ActivityType = "VISIT" | "ZONE_OPERATION" | "PROPERTY_OPERATION" | "ROUTE_OPERATION";
 export type OperationType = "CREATE" | "UPDATE" | "DELETE";
 
 export interface Activity {

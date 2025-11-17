@@ -69,6 +69,10 @@ export default function ActivitiesScreen() {
       const operation = activity.operationType?.toLowerCase() || "updated";
       return `Property ${operation}`;
     }
+    if (activity.activityType === "ROUTE_OPERATION") {
+      const operation = activity.operationType?.toLowerCase() || "updated";
+      return `Route ${operation}`;
+    }
 
     // Handle VISIT activities
     const titleMap: Record<string, string> = {
@@ -86,6 +90,10 @@ export default function ActivitiesScreen() {
     if (activity.activityType === "ZONE_OPERATION") {
       const zoneName = activity.zoneId?.name || "territory";
       return activity.notes || `Zone ${activity.operationType?.toLowerCase()} in ${zoneName}`;
+    }
+    if (activity.activityType === "ROUTE_OPERATION") {
+      const zoneName = activity.zoneId?.name || "territory";
+      return activity.notes || `Route ${activity.operationType?.toLowerCase()} in ${zoneName}`;
     }
     if (activity.activityType === "PROPERTY_OPERATION") {
       const zoneName = activity.zoneId?.name || "territory";

@@ -46,6 +46,7 @@ import {
   type Municipality,
   type Community,
 } from "@/lib/locationApi";
+import { getGoogleMapsApiKey } from "@/lib/googleMaps";
 import {
   createAgentZone,
   fetchAgentZoneById,
@@ -1032,7 +1033,60 @@ export default function CreateZoneScreen({
 
       try {
         setIsSearchingLocation(true);
-        const results = await Location.geocodeAsync(trimmed);
+        
+        // Use Google Geocoding API instead of expo-location to avoid permission issues
+        const apiKey = getGoogleMapsApiKey();
+        if (!apiKey) {
+          throw new Error("Google Maps API key not configured");
+        }
+
+        const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(trimmed)}&key=${apiKey}`;
+        const response = await fetch(geocodeUrl);
+        const data = await response.json();
+
+        if (data.status !== "OK" || !data.results || data.results.length === 0) {
+          Alert.alert(
+            "Location not found",
+            "Try a different address or place."
+          );
+          return;
+        }
+
+        // Convert Google Geocoding results to expo-location format for compatibility
+        const results: LocationGeocodedLocation[] = data.results.map((result: any) => {
+          const location = result.geometry.location;
+          const addressComponents = result.address_components || [];
+          
+          // Extract address components
+          const getComponent = (type: string, useShortName = false) => {
+            const component = addressComponents.find((comp: any) => 
+              comp.types.includes(type)
+            );
+            return component ? (useShortName ? component.short_name : component.long_name) : "";
+          };
+
+          const countryComponent = addressComponents.find((comp: any) => 
+            comp.types.includes("country")
+          );
+
+          return {
+            latitude: location.lat,
+            longitude: location.lng,
+            altitude: null,
+            accuracy: null,
+            altitudeAccuracy: null,
+            heading: null,
+            speed: null,
+            // Additional fields for selectPreferredGeocodeResult
+            country: getComponent("country"),
+            isoCountryCode: countryComponent?.short_name?.toUpperCase() || "",
+            region: getComponent("administrative_area_level_1"),
+            city: getComponent("locality") || getComponent("administrative_area_level_2"),
+            street: getComponent("route"),
+            streetNumber: getComponent("street_number"),
+            postalCode: getComponent("postal_code"),
+          } as LocationGeocodedLocation;
+        });
 
         if (!results || results.length === 0) {
           Alert.alert(

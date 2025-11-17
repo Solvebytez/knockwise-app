@@ -45,6 +45,7 @@ import {
   UpdateRouteRequest,
 } from "@/lib/routeApi";
 import { getGoogleMapsApiKey } from "@/lib/googleMaps";
+import { LinearGradient } from "expo-linear-gradient";
 import {
   COLORS,
   PADDING,
@@ -148,6 +149,29 @@ const normalizeAddressLine = (line: string): string => {
 
 const kilometersToMiles = (kilometers: number): number => {
   return kilometers * 0.621371;
+};
+
+// Color palette for alphabetical badges
+const getLetterColor = (letter: string): string => {
+  const colors = [
+    "#3b82f6", // Blue
+    "#10b981", // Green
+    "#f59e0b", // Amber
+    "#ef4444", // Red
+    "#8b5cf6", // Purple
+    "#ec4899", // Pink
+    "#06b6d4", // Cyan
+    "#f97316", // Orange
+    "#84cc16", // Lime
+    "#6366f1", // Indigo
+    "#14b8a6", // Teal
+    "#f43f5e", // Rose
+    "#a855f7", // Violet
+    "#22c55e", // Emerald
+    "#eab308", // Yellow
+  ];
+  const index = letter.charCodeAt(0) - 65; // A=0, B=1, etc.
+  return colors[index % colors.length];
 };
 
 export default function MyRoutesScreen(): React.JSX.Element {
@@ -1222,6 +1246,7 @@ export default function MyRoutesScreen(): React.JSX.Element {
         coordinate: { latitude: number; longitude: number };
         label: string;
         type: "start" | "stop" | "end";
+        letter: string;
       }[];
     }
     const markers: {
@@ -1229,6 +1254,7 @@ export default function MyRoutesScreen(): React.JSX.Element {
       coordinate: { latitude: number; longitude: number };
       label: string;
       type: "start" | "stop" | "end";
+      letter: string;
     }[] = [];
     const seen = new Set<string>();
     selectedPreviewDetails.legs.forEach((leg, index) => {
@@ -1236,6 +1262,7 @@ export default function MyRoutesScreen(): React.JSX.Element {
         const coordKey = `${leg.startLocation[0]},${leg.startLocation[1]}`;
         if (!seen.has(coordKey)) {
           seen.add(coordKey);
+          const letter = String.fromCharCode(65 + index); // A, B, C...
           markers.push({
             key: `leg-${index}-start`,
             coordinate: {
@@ -1244,6 +1271,7 @@ export default function MyRoutesScreen(): React.JSX.Element {
             },
             label: index === 0 ? "Start" : leg.startAddress,
             type: index === 0 ? "start" : "stop",
+            letter: letter,
           });
         }
       }
@@ -1251,6 +1279,7 @@ export default function MyRoutesScreen(): React.JSX.Element {
         const coordKey = `${leg.endLocation[0]},${leg.endLocation[1]}`;
         if (!seen.has(coordKey)) {
           seen.add(coordKey);
+          const letter = String.fromCharCode(66 + index); // B, C, D...
           markers.push({
             key: `leg-${index}-end`,
             coordinate: {
@@ -1263,6 +1292,7 @@ export default function MyRoutesScreen(): React.JSX.Element {
                 : leg.endAddress,
             type:
               index === selectedPreviewDetails.legs.length - 1 ? "end" : "stop",
+            letter: letter,
           });
         }
       }
@@ -2179,24 +2209,60 @@ export default function MyRoutesScreen(): React.JSX.Element {
                   </Body3>
                   {selectedPreviewDetails.legs.length > 0 && (
                     <View style={styles.previewLocationsGroup}>
-                      <View style={styles.previewLocationCard}>
-                        <Body3 style={styles.previewLocationLabel}>Start</Body3>
-                        <Body3 style={styles.previewLocationAddress}>
-                          {selectedPreviewDetails.legs[0]?.startAddress}
-                        </Body3>
-                      </View>
-                      <View style={styles.previewLocationCard}>
-                        <Body3 style={styles.previewLocationLabel}>
-                          Destination
-                        </Body3>
-                        <Body3 style={styles.previewLocationAddress}>
-                          {
-                            selectedPreviewDetails.legs[
-                              selectedPreviewDetails.legs.length - 1
-                            ]?.endAddress
-                          }
-                        </Body3>
-                      </View>
+                      <LinearGradient
+                        colors={["#10b981", "#059669"]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.previewLocationCard}
+                      >
+                        <View style={styles.previewLocationCardContent}>
+                          <View style={styles.previewLetterBadgeLarge}>
+                            <Body3
+                              weight="bold"
+                              style={[
+                                styles.previewLetterBadgeTextLarge,
+                                { color: getLetterColor("A") },
+                              ]}
+                            >
+                              A
+                            </Body3>
+                          </View>
+                          <Body3 style={styles.previewLocationAddressStart}>
+                            {selectedPreviewDetails.legs[0]?.startAddress}
+                          </Body3>
+                        </View>
+                      </LinearGradient>
+                      <LinearGradient
+                        colors={["#f59e0b", "#d97706"]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.previewLocationCard}
+                      >
+                        <View style={styles.previewLocationCardContent}>
+                          <View style={styles.previewLetterBadgeLarge}>
+                            <Body3
+                              weight="bold"
+                              style={[
+                                styles.previewLetterBadgeTextLarge,
+                                {
+                                  color: getLetterColor(
+                                    String.fromCharCode(65 + selectedPreviewDetails.legs.length)
+                                  ),
+                                },
+                              ]}
+                            >
+                              {String.fromCharCode(65 + selectedPreviewDetails.legs.length)}
+                            </Body3>
+                          </View>
+                          <Body3 style={styles.previewLocationAddressDestination}>
+                            {
+                              selectedPreviewDetails.legs[
+                                selectedPreviewDetails.legs.length - 1
+                              ]?.endAddress
+                            }
+                          </Body3>
+                        </View>
+                      </LinearGradient>
                     </View>
                   )}
                   <View style={styles.previewSummaryGrid}>
@@ -2246,14 +2312,27 @@ export default function MyRoutesScreen(): React.JSX.Element {
                     const legDurationText =
                       leg.durationText ||
                       formatDurationFromSeconds(leg.duration);
+                    // Convert index to alphabetical label (0 -> A, 1 -> B, etc.)
+                    const startLetter = String.fromCharCode(65 + legIndex); // A, B, C...
+                    const endLetter = String.fromCharCode(66 + legIndex); // B, C, D...
                     return (
                       <View key={`leg-${legIndex}`} style={styles.previewLeg}>
                         <View style={styles.previewLegHeader}>
                           <View style={styles.previewLegRoute}>
                             <View style={styles.previewLegLocationBlock}>
-                              <Body3 style={styles.previewLegLocationLabel}>
-                                {legIndex === 0 ? "Start" : "From"}
-                              </Body3>
+                              <View
+                                style={[
+                                  styles.previewLetterBadge,
+                                  { backgroundColor: getLetterColor(startLetter) },
+                                ]}
+                              >
+                                <Body3
+                                  weight="bold"
+                                  style={styles.previewLetterBadgeText}
+                                >
+                                  {startLetter}
+                                </Body3>
+                              </View>
                               <Body3
                                 style={styles.previewLegLocationText}
                                 numberOfLines={2}
@@ -2263,9 +2342,19 @@ export default function MyRoutesScreen(): React.JSX.Element {
                             </View>
                             <Body3 style={styles.previewLegArrow}>→</Body3>
                             <View style={styles.previewLegLocationBlock}>
-                              <Body3 style={styles.previewLegLocationLabel}>
-                                To
-                              </Body3>
+                              <View
+                                style={[
+                                  styles.previewLetterBadge,
+                                  { backgroundColor: getLetterColor(endLetter) },
+                                ]}
+                              >
+                                <Body3
+                                  weight="bold"
+                                  style={styles.previewLetterBadgeText}
+                                >
+                                  {endLetter}
+                                </Body3>
+                              </View>
                               <Body3
                                 style={styles.previewLegLocationText}
                                 numberOfLines={2}
@@ -2279,41 +2368,6 @@ export default function MyRoutesScreen(): React.JSX.Element {
                               {legDurationText} • {legDistanceText}
                             </Body3>
                           </View>
-                        </View>
-                        <View style={styles.previewSteps}>
-                          {leg.steps.map((step, stepIndex) => {
-                            const stepDistanceText =
-                              step.distanceText ||
-                              formatDistanceDetailed(
-                                metersToKilometers(step.distance)
-                              );
-                            const stepDurationText =
-                              step.durationText ||
-                              formatDurationFromSeconds(step.duration);
-                            return (
-                              <View
-                                key={`leg-${legIndex}-step-${stepIndex}`}
-                                style={styles.previewStepRow}
-                              >
-                                <View style={styles.previewStepNumber}>
-                                  <Body3 weight="semiBold" color={COLORS.white}>
-                                    {stepIndex + 1}
-                                  </Body3>
-                                </View>
-                                <View style={styles.previewStepContent}>
-                                  <Body3
-                                    color={COLORS.text.primary}
-                                    style={styles.previewStepInstruction}
-                                  >
-                                    {step.instruction || "Continue"}
-                                  </Body3>
-                                  <Body3 style={styles.previewStepMeta}>
-                                    {stepDurationText} • {stepDistanceText}
-                                  </Body3>
-                                </View>
-                              </View>
-                            );
-                          })}
                         </View>
                       </View>
                     );
@@ -2366,6 +2420,44 @@ export default function MyRoutesScreen(): React.JSX.Element {
                   Live Google Map with the selected route and stop markers.
                 </Body3>
               </View>
+              {selectedPreviewDetails && plannerPreviewPolyline.length > 0 && (
+                <View style={styles.mapLegendContainer}>
+                  <View style={styles.mapLegendItem}>
+                    <View
+                      style={[
+                        styles.mapLegendBadge,
+                        { backgroundColor: COLORS.success[600] },
+                      ]}
+                    >
+                      <Body3
+                        weight="bold"
+                        style={styles.mapLegendBadgeText}
+                      >
+                        A
+                      </Body3>
+                    </View>
+                    <Body3 style={styles.mapLegendLabel}>Start</Body3>
+                  </View>
+                  <View style={styles.mapLegendItem}>
+                    <View
+                      style={[
+                        styles.mapLegendBadge,
+                        {
+                          backgroundColor: COLORS.error[500],
+                        },
+                      ]}
+                    >
+                      <Body3
+                        weight="bold"
+                        style={styles.mapLegendBadgeText}
+                      >
+                        {String.fromCharCode(65 + selectedPreviewDetails.legs.length)}
+                      </Body3>
+                    </View>
+                    <Body3 style={styles.mapLegendLabel}>Destination</Body3>
+                  </View>
+                </View>
+              )}
               {selectedPreviewDetails && plannerPreviewPolyline.length > 0 ? (
                 <View style={styles.previewMapContainer}>
                   <MapView
@@ -2384,14 +2476,28 @@ export default function MyRoutesScreen(): React.JSX.Element {
                         key={marker.key}
                         coordinate={marker.coordinate}
                         title={marker.label}
-                        pinColor={
-                          marker.type === "start"
-                            ? COLORS.success[600]
-                            : marker.type === "end"
-                            ? COLORS.error[500]
-                            : COLORS.primary[600]
-                        }
-                      />
+                      >
+                        <View
+                          style={[
+                            styles.mapMarkerBadge,
+                            {
+                              backgroundColor:
+                                marker.type === "start"
+                                  ? COLORS.success[600]
+                                  : marker.type === "end"
+                                  ? COLORS.error[500]
+                                  : getLetterColor(marker.letter),
+                            },
+                          ]}
+                        >
+                          <Body3
+                            weight="bold"
+                            style={styles.mapMarkerBadgeText}
+                          >
+                            {marker.letter}
+                          </Body3>
+                        </View>
+                      </Marker>
                     ))}
                   </MapView>
                 </View>
@@ -2514,25 +2620,61 @@ export default function MyRoutesScreen(): React.JSX.Element {
                         </Body1>
                         {selectedAlt.legs.length > 0 && (
                           <View style={styles.previewLocationsGroup}>
-                            <View style={styles.previewLocationCard}>
-                              <Body3 style={styles.previewLocationLabel}>
-                                Start
-                              </Body3>
-                              <Body3 style={styles.previewLocationAddress}>
-                                {selectedAlt.legs[0]?.startAddress}
-                              </Body3>
-                            </View>
-                            <View style={styles.previewLocationCard}>
-                              <Body3 style={styles.previewLocationLabel}>
-                                Destination
-                              </Body3>
-                              <Body3 style={styles.previewLocationAddress}>
-                                {
-                                  selectedAlt.legs[selectedAlt.legs.length - 1]
-                                    ?.endAddress
-                                }
-                              </Body3>
-                            </View>
+                            <LinearGradient
+                              colors={["#10b981", "#059669"]}
+                              start={{ x: 0, y: 0 }}
+                              end={{ x: 1, y: 1 }}
+                              style={styles.previewLocationCard}
+                            >
+                              <View style={styles.previewLocationCardContent}>
+                                <View style={styles.previewLetterBadgeLarge}>
+                                  <Body3
+                                    weight="bold"
+                                    style={[
+                                      styles.previewLetterBadgeTextLarge,
+                                      { color: getLetterColor("A") },
+                                    ]}
+                                  >
+                                    A
+                                  </Body3>
+                                </View>
+                                <Body3 style={styles.previewLocationAddressStart}>
+                                  {selectedAlt.legs[0]?.startAddress}
+                                </Body3>
+                              </View>
+                            </LinearGradient>
+                            <LinearGradient
+                              colors={["#f59e0b", "#d97706"]}
+                              start={{ x: 0, y: 0 }}
+                              end={{ x: 1, y: 1 }}
+                              style={styles.previewLocationCard}
+                            >
+                              <View style={styles.previewLocationCardContent}>
+                                <View style={styles.previewLetterBadgeLarge}>
+                                  <Body3
+                                    weight="bold"
+                                    style={[
+                                      styles.previewLetterBadgeTextLarge,
+                                      {
+                                        color: getLetterColor(
+                                          String.fromCharCode(65 + selectedAlt.legs.length)
+                                        ),
+                                      },
+                                    ]}
+                                  >
+                                    {String.fromCharCode(65 + selectedAlt.legs.length)}
+                                  </Body3>
+                                </View>
+                                <Body3
+                                  style={styles.previewLocationAddressDestination}
+                                >
+                                  {
+                                    selectedAlt.legs[selectedAlt.legs.length - 1]
+                                      ?.endAddress
+                                  }
+                                </Body3>
+                              </View>
+                            </LinearGradient>
                           </View>
                         )}
                         {selectedAlt.legs.map((leg, legIndex) => {
@@ -2544,6 +2686,9 @@ export default function MyRoutesScreen(): React.JSX.Element {
                           const legDurationText =
                             leg.durationText ||
                             formatDurationFromSeconds(leg.duration);
+                          // Convert index to alphabetical label (0 -> A, 1 -> B, etc.)
+                          const startLetter = String.fromCharCode(65 + legIndex); // A, B, C...
+                          const endLetter = String.fromCharCode(66 + legIndex); // B, C, D...
                           return (
                             <View
                               key={`leg-${legIndex}`}
@@ -2552,11 +2697,19 @@ export default function MyRoutesScreen(): React.JSX.Element {
                               <View style={styles.previewLegHeader}>
                                 <View style={styles.previewLegRoute}>
                                   <View style={styles.previewLegLocationBlock}>
-                                    <Body3
-                                      style={styles.previewLegLocationLabel}
+                                    <View
+                                      style={[
+                                        styles.previewLetterBadge,
+                                        { backgroundColor: getLetterColor(startLetter) },
+                                      ]}
                                     >
-                                      {legIndex === 0 ? "Start" : "From"}
-                                    </Body3>
+                                      <Body3
+                                        weight="bold"
+                                        style={styles.previewLetterBadgeText}
+                                      >
+                                        {startLetter}
+                                      </Body3>
+                                    </View>
                                     <Body3
                                       style={styles.previewLegLocationText}
                                       numberOfLines={2}
@@ -2568,11 +2721,19 @@ export default function MyRoutesScreen(): React.JSX.Element {
                                     →
                                   </Body3>
                                   <View style={styles.previewLegLocationBlock}>
-                                    <Body3
-                                      style={styles.previewLegLocationLabel}
+                                    <View
+                                      style={[
+                                        styles.previewLetterBadge,
+                                        { backgroundColor: getLetterColor(endLetter) },
+                                      ]}
                                     >
-                                      To
-                                    </Body3>
+                                      <Body3
+                                        weight="bold"
+                                        style={styles.previewLetterBadgeText}
+                                      >
+                                        {endLetter}
+                                      </Body3>
+                                    </View>
                                     <Body3
                                       style={styles.previewLegLocationText}
                                       numberOfLines={2}
@@ -2586,45 +2747,6 @@ export default function MyRoutesScreen(): React.JSX.Element {
                                     {legDurationText} • {legDistanceText}
                                   </Body3>
                                 </View>
-                              </View>
-                              <View style={styles.previewSteps}>
-                                {leg.steps.map((step, stepIndex) => {
-                                  const stepDistanceText =
-                                    step.distanceText ||
-                                    formatDistanceDetailed(
-                                      metersToKilometers(step.distance)
-                                    );
-                                  const stepDurationText =
-                                    step.durationText ||
-                                    formatDurationFromSeconds(step.duration);
-                                  return (
-                                    <View
-                                      key={`leg-${legIndex}-step-${stepIndex}`}
-                                      style={styles.previewStepRow}
-                                    >
-                                      <View style={styles.previewStepNumber}>
-                                        <Body3
-                                          weight="semiBold"
-                                          color={COLORS.white}
-                                        >
-                                          {stepIndex + 1}
-                                        </Body3>
-                                      </View>
-                                      <View style={styles.previewStepContent}>
-                                        <Body3
-                                          color={COLORS.text.primary}
-                                          style={styles.previewStepInstruction}
-                                        >
-                                          {step.instruction || "Continue"}
-                                        </Body3>
-                                        <Body3 style={styles.previewStepMeta}>
-                                          {stepDurationText} •{" "}
-                                          {stepDistanceText}
-                                        </Body3>
-                                      </View>
-                                    </View>
-                                  );
-                                })}
                               </View>
                             </View>
                           );
@@ -2692,6 +2814,50 @@ export default function MyRoutesScreen(): React.JSX.Element {
                   Live Google Map with the selected route and stop markers.
                 </Body3>
               </View>
+              {selectedRouteForPreview?.routeDetails?.alternatives?.[0] && (
+                <View style={styles.mapLegendContainer}>
+                  <View style={styles.mapLegendItem}>
+                    <View
+                      style={[
+                        styles.mapLegendBadge,
+                        { backgroundColor: COLORS.success[600] },
+                      ]}
+                    >
+                      <Body3
+                        weight="bold"
+                        style={styles.mapLegendBadgeText}
+                      >
+                        A
+                      </Body3>
+                    </View>
+                    <Body3 style={styles.mapLegendLabel}>Start</Body3>
+                  </View>
+                  <View style={styles.mapLegendItem}>
+                    <View
+                      style={[
+                        styles.mapLegendBadge,
+                        {
+                          backgroundColor: COLORS.error[500],
+                        },
+                      ]}
+                    >
+                      <Body3
+                        weight="bold"
+                        style={styles.mapLegendBadgeText}
+                      >
+                        {String.fromCharCode(
+                          65 +
+                            (selectedRouteForPreview.routeDetails.alternatives[
+                              selectedRouteForPreview.routeDetails
+                                .selectedAlternativeIndex || 0
+                            ]?.legs?.length || 0)
+                        )}
+                      </Body3>
+                    </View>
+                    <Body3 style={styles.mapLegendLabel}>Destination</Body3>
+                  </View>
+                </View>
+              )}
               {selectedRouteForPreview?.routeDetails?.alternatives?.[0] ? (
                 <View style={styles.previewMapContainer}>
                   <MapView
@@ -2766,6 +2932,14 @@ export default function MyRoutesScreen(): React.JSX.Element {
                         .selectedAlternativeIndex || 0
                     ].legs.map((leg, legIndex) => {
                       const markers = [];
+                      const startLetter = String.fromCharCode(65 + legIndex); // A, B, C...
+                      const endLetter = String.fromCharCode(66 + legIndex); // B, C, D...
+                      const totalLegs =
+                        selectedRouteForPreview.routeDetails!.alternatives[
+                          selectedRouteForPreview.routeDetails!
+                            .selectedAlternativeIndex || 0
+                        ].legs.length;
+
                       if (legIndex === 0) {
                         markers.push(
                           <Marker
@@ -2775,8 +2949,21 @@ export default function MyRoutesScreen(): React.JSX.Element {
                               longitude: leg.startLocation[0],
                             }}
                             title="Start"
-                            pinColor={COLORS.success[600]}
-                          />
+                          >
+                            <View
+                              style={[
+                                styles.mapMarkerBadge,
+                                { backgroundColor: COLORS.success[600] },
+                              ]}
+                            >
+                              <Body3
+                                weight="bold"
+                                style={styles.mapMarkerBadgeText}
+                              >
+                                {startLetter}
+                              </Body3>
+                            </View>
+                          </Marker>
                         );
                       }
                       markers.push(
@@ -2787,17 +2974,26 @@ export default function MyRoutesScreen(): React.JSX.Element {
                             longitude: leg.endLocation[0],
                           }}
                           title={leg.endAddress}
-                          pinColor={
-                            legIndex ===
-                            selectedRouteForPreview.routeDetails!.alternatives[
-                              selectedRouteForPreview.routeDetails!
-                                .selectedAlternativeIndex || 0
-                            ].legs.length -
-                              1
-                              ? COLORS.error[500]
-                              : COLORS.primary[600]
-                          }
-                        />
+                        >
+                          <View
+                            style={[
+                              styles.mapMarkerBadge,
+                              {
+                                backgroundColor:
+                                  legIndex === totalLegs - 1
+                                    ? COLORS.error[500]
+                                    : getLetterColor(endLetter),
+                              },
+                            ]}
+                          >
+                            <Body3
+                              weight="bold"
+                              style={styles.mapMarkerBadgeText}
+                            >
+                              {endLetter}
+                            </Body3>
+                          </View>
+                        </Marker>
                       );
                       return markers;
                     })}
@@ -3559,12 +3755,14 @@ const styles = StyleSheet.create({
     gap: responsiveSpacing(SPACING.sm),
   },
   previewLocationCard: {
-    padding: responsiveSpacing(SPACING.sm),
     borderRadius: responsiveScale(10),
-    backgroundColor: COLORS.neutral[50],
-    borderWidth: 1,
-    borderColor: COLORS.neutral[200],
-    gap: responsiveSpacing(SPACING.xs / 2),
+    overflow: "hidden",
+    width: "100%",
+    minHeight: responsiveScale(60),
+  },
+  previewLocationCardContent: {
+    padding: responsiveSpacing(SPACING.sm),
+    flexDirection: "column",
   },
   previewLocationLabel: {
     color: COLORS.text.secondary,
@@ -3574,6 +3772,71 @@ const styles = StyleSheet.create({
   previewLocationAddress: {
     color: COLORS.text.primary,
     fontWeight: "600",
+  },
+  previewLocationLabelStart: {
+    color: COLORS.white,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    fontSize: responsiveScale(11),
+    letterSpacing: 0.5,
+    marginBottom: responsiveSpacing(SPACING.xs / 2),
+  },
+  previewLocationAddressStart: {
+    color: COLORS.white,
+    fontWeight: "600",
+    fontSize: responsiveScale(13),
+  },
+  previewLocationLabelDestination: {
+    color: COLORS.white,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    fontSize: responsiveScale(11),
+    letterSpacing: 0.5,
+    marginBottom: responsiveSpacing(SPACING.xs / 2),
+  },
+  previewLocationAddressDestination: {
+    color: COLORS.white,
+    fontWeight: "600",
+    fontSize: responsiveScale(13),
+  },
+  previewLetterBadge: {
+    width: responsiveScale(28),
+    height: responsiveScale(28),
+    borderRadius: responsiveScale(14),
+    backgroundColor: COLORS.primary[500],
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: responsiveSpacing(SPACING.xs / 2),
+    shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  previewLetterBadgeText: {
+    color: COLORS.white,
+    fontSize: responsiveScale(12),
+    fontWeight: "700",
+  },
+  previewLetterBadgeLarge: {
+    width: responsiveScale(40),
+    height: responsiveScale(40),
+    borderRadius: responsiveScale(20),
+    backgroundColor: COLORS.white,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: responsiveSpacing(SPACING.xs / 2),
+    shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 5,
+    elevation: 4,
+    borderWidth: 2,
+    borderColor: COLORS.neutral[200],
+  },
+  previewLetterBadgeTextLarge: {
+    fontSize: responsiveScale(16),
+    fontWeight: "700",
   },
   previewSectionTitle: {
     marginBottom: responsiveSpacing(SPACING.xs / 2),
@@ -3788,5 +4051,65 @@ const styles = StyleSheet.create({
     paddingTop: responsiveSpacing(SPACING.lg),
     paddingBottom: responsiveSpacing(SPACING.md),
     gap: responsiveSpacing(SPACING.xs),
+  },
+  mapMarkerBadge: {
+    width: responsiveScale(32),
+    height: responsiveScale(32),
+    borderRadius: responsiveScale(16),
+    backgroundColor: COLORS.primary[600],
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 3,
+    borderColor: COLORS.white,
+    shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  mapMarkerBadgeText: {
+    color: COLORS.white,
+    fontSize: responsiveScale(14),
+    fontWeight: "700",
+  },
+  mapLegendContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: responsiveSpacing(SPACING.lg),
+    paddingVertical: responsiveSpacing(SPACING.sm),
+    backgroundColor: COLORS.white,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.neutral[200],
+  },
+  mapLegendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: responsiveSpacing(SPACING.md),
+  },
+  mapLegendBadge: {
+    width: responsiveScale(28),
+    height: responsiveScale(28),
+    borderRadius: responsiveScale(14),
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: COLORS.white,
+    shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
+    marginRight: responsiveSpacing(SPACING.xs),
+  },
+  mapLegendBadgeText: {
+    color: COLORS.white,
+    fontSize: responsiveScale(12),
+    fontWeight: "700",
+  },
+  mapLegendLabel: {
+    color: COLORS.text.primary,
+    fontSize: responsiveScale(13),
+    fontWeight: "600",
   },
 });

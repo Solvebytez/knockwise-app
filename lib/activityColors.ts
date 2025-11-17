@@ -50,6 +50,16 @@ export const getActivityColors = (activity: Activity): ActivityColors => {
     return colors;
   }
 
+  // Handle ROUTE_OPERATION activities - color based on operationType (same as zone operations)
+  if (activity.activityType === "ROUTE_OPERATION") {
+    const colors = getZoneOperationColors(activity.operationType); // Reuse zone operation colors
+    console.log(
+      `✅ ROUTE_OPERATION activity - operationType: ${activity.operationType}, colors:`,
+      colors
+    );
+    return colors;
+  }
+
   // Default fallback (shouldn't happen, but just in case)
   console.log("⚠️ Default fallback colors used");
   return {

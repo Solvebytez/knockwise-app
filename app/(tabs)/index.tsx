@@ -204,6 +204,10 @@ export default function HomeScreen() {
         const operation = activity.operationType?.toLowerCase() || "updated";
         return `Property ${operation}`;
       }
+      if (activity.activityType === "ROUTE_OPERATION") {
+        const operation = activity.operationType?.toLowerCase() || "updated";
+        return `Route ${operation}`;
+      }
 
       // Handle VISIT activities (only if activityType is VISIT or undefined/legacy)
       if (!activity.response) return "Visit completed";
@@ -224,6 +228,13 @@ export default function HomeScreen() {
         return (
           activity.notes ||
           `Zone ${activity.operationType?.toLowerCase()} in ${zoneName}`
+        );
+      }
+      if (activity.activityType === "ROUTE_OPERATION") {
+        const zoneName = activity.zoneId?.name || "territory";
+        return (
+          activity.notes ||
+          `Route ${activity.operationType?.toLowerCase()} in ${zoneName}`
         );
       }
       if (activity.activityType === "PROPERTY_OPERATION") {
@@ -269,7 +280,8 @@ export default function HomeScreen() {
       .map((activity) => {
         const status =
           activity.activityType === "ZONE_OPERATION" ||
-          activity.activityType === "PROPERTY_OPERATION"
+          activity.activityType === "PROPERTY_OPERATION" ||
+          activity.activityType === "ROUTE_OPERATION"
             ? "completed"
             : activity.response === "LEAD_CREATED" ||
               activity.response === "APPOINTMENT_SET"
