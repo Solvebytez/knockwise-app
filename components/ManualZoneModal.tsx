@@ -67,6 +67,7 @@ const ManualZoneModal: React.FC<ManualZoneModalProps> = ({
     useState<PropertyFormState>(DEFAULT_PROPERTY_FORM);
   const [isValidatingAddress, setIsValidatingAddress] = useState(false);
   const [isSavingProperty, setIsSavingProperty] = useState(false);
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
   const [baseStreetName, setBaseStreetName] = useState("");
   const [lastHouseNumber, setLastHouseNumber] = useState<number | null>(null);
   const [initialStreetCaptured, setInitialStreetCaptured] = useState(false);
@@ -248,12 +249,14 @@ const ManualZoneModal: React.FC<ManualZoneModalProps> = ({
 
   const handleUseLocation = async () => {
     try {
+      setIsGettingLocation(true);
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") {
         Alert.alert(
           "Permission denied",
           "Location permission is required to use this feature."
         );
+        setIsGettingLocation(false);
         return;
       }
 
@@ -261,24 +264,69 @@ const ManualZoneModal: React.FC<ManualZoneModalProps> = ({
         accuracy: Location.Accuracy.High,
       });
 
+      const lat = location.coords.latitude;
+      const lng = location.coords.longitude;
+
       setPropertyForm((prev) => ({
         ...prev,
-        latitude: location.coords.latitude.toString(),
-        longitude: location.coords.longitude.toString(),
+        latitude: lat.toString(),
+        longitude: lng.toString(),
       }));
 
-      Alert.alert(
-        "Location captured",
-        `Lat: ${location.coords.latitude.toFixed(
-          6
-        )}, Lng: ${location.coords.longitude.toFixed(6)}`
-      );
+      try {
+        const geocodeResult = await Location.reverseGeocodeAsync({
+          latitude: lat,
+          longitude: lng,
+        });
+
+        if (geocodeResult && geocodeResult.length > 0) {
+          const address = geocodeResult[0];
+          const addr = address as any;
+          const formattedAddress = [
+            addr.streetNumber,
+            addr.street,
+            addr.city,
+            addr.region,
+            addr.postalCode,
+            addr.country,
+          ]
+            .filter(Boolean)
+            .join(", ");
+
+          const houseNumber =
+            addr.streetNumber || formattedAddress.match(/^(\d+)/)?.[1] || "";
+
+          setPropertyForm((prev) => ({
+            ...prev,
+            address: formattedAddress || prev.address,
+            houseNumber: houseNumber || prev.houseNumber,
+          }));
+
+          Alert.alert(
+            "Location captured",
+            `Address: ${formattedAddress || `${lat.toFixed(6)}, ${lng.toFixed(6)}`}`
+          );
+        } else {
+          Alert.alert(
+            "Location captured",
+            `Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}`
+          );
+        }
+      } catch (geocodeError) {
+        console.error("[ManualZoneModal] Error reverse geocoding:", geocodeError);
+        Alert.alert(
+          "Location captured",
+          `Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}`
+        );
+      }
     } catch (error) {
       console.error("[ManualZoneModal] Failed to use location:", error);
       Alert.alert(
         "Error",
         "Failed to get your location. Please try again or enter manually."
       );
+    } finally {
+      setIsGettingLocation(false);
     }
   };
 
@@ -454,11 +502,12 @@ const ManualZoneModal: React.FC<ManualZoneModalProps> = ({
               />
               <Button
                 title="Use My Location"
-                variant="ghost"
+                variant="outline"
                 size="small"
                 onPress={handleUseLocation}
+                loading={isGettingLocation}
                 containerStyle={styles.inlineButton}
-                disabled={!zone}
+                disabled={!zone || isGettingLocation}
               />
             </View>
 

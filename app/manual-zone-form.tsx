@@ -1074,12 +1074,62 @@ export default function ManualZoneFormScreen() {
                                 const location = await Location.getCurrentPositionAsync({
                                   accuracy: Location.Accuracy.High,
                                 });
+                                
+                                const lat = location.coords.latitude;
+                                const lng = location.coords.longitude;
+
                                 setEditFormData((prev) => ({
                                   ...prev,
-                                  latitude: location.coords.latitude.toString(),
-                                  longitude: location.coords.longitude.toString(),
+                                  latitude: lat.toString(),
+                                  longitude: lng.toString(),
                                 }));
-                                Alert.alert("Success", "Location captured!");
+
+                                try {
+                                  const geocodeResult = await Location.reverseGeocodeAsync({
+                                    latitude: lat,
+                                    longitude: lng,
+                                  });
+
+                                  if (geocodeResult && geocodeResult.length > 0) {
+                                    const address = geocodeResult[0];
+                                    const addr = address as any;
+                                    const formattedAddress = [
+                                      addr.streetNumber,
+                                      addr.street,
+                                      addr.city,
+                                      addr.region,
+                                      addr.postalCode,
+                                      addr.country,
+                                    ]
+                                      .filter(Boolean)
+                                      .join(", ");
+
+                                    const houseNumber =
+                                      addr.streetNumber || formattedAddress.match(/^(\d+)/)?.[1] || "";
+
+                                    setEditFormData((prev) => ({
+                                      ...prev,
+                                      address: formattedAddress || prev.address,
+                                      houseNumber: houseNumber || prev.houseNumber,
+                                    }));
+
+                                    Alert.alert(
+                                      "Location Captured",
+                                      `Address: ${formattedAddress || `${lat.toFixed(6)}, ${lng.toFixed(6)}`}`
+                                    );
+                                  } else {
+                                    Alert.alert(
+                                      "Location Captured",
+                                      `Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}`
+                                    );
+                                  }
+                                } catch (geocodeError) {
+                                  console.error("Error reverse geocoding:", geocodeError);
+                                  Alert.alert(
+                                    "Location Captured",
+                                    `Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}`
+                                  );
+                                }
                               } catch (error: any) {
                                 Alert.alert("Error", error.message || "Failed to get location");
                               } finally {
@@ -1089,11 +1139,18 @@ export default function ManualZoneFormScreen() {
                             disabled={isUpdatingResident || isEditGettingLocation}
                             activeOpacity={0.7}
                           >
-                            <Ionicons
-                              name="location-outline"
-                              size={responsiveScale(16)}
-                              color={COLORS.primary[500]}
-                            />
+                            {isEditGettingLocation ? (
+                              <ActivityIndicator
+                                size="small"
+                                color={COLORS.primary[500]}
+                              />
+                            ) : (
+                              <Ionicons
+                                name="location-outline"
+                                size={responsiveScale(16)}
+                                color={COLORS.primary[500]}
+                              />
+                            )}
                             <Text style={styles.editFormLocationButtonText}>
                               {isEditGettingLocation ? "Getting..." : "Use My Location"}
                             </Text>
