@@ -23,12 +23,41 @@ export interface CreateManualZonePayload {
   communityId: string;
 }
 
+export interface UpdateManualZonePayload {
+  name?: string;
+  description?: string;
+  areaId?: string;
+  municipalityId?: string;
+  communityId?: string;
+}
+
 export const createManualZone = async (
   payload: CreateManualZonePayload
 ): Promise<ManualZoneRecord> => {
   // Use the new /agent-zones/manual endpoint (no boundary required)
   const response = await apiInstance.post<ManualZoneResponse>(
     "/agent-zones/manual",
+    {
+      name: payload.name,
+      description: payload.description,
+      areaId: payload.areaId,
+      municipalityId: payload.municipalityId,
+      communityId: payload.communityId,
+    }
+  );
+  if (!response.data?.data?._id) {
+    throw new Error("Manual zone response missing ID");
+  }
+  return response.data.data;
+};
+
+export const updateManualZone = async (
+  zoneId: string,
+  payload: UpdateManualZonePayload
+): Promise<ManualZoneRecord> => {
+  // Use the mobile-specific /agent-zones/manual/:id endpoint
+  const response = await apiInstance.put<ManualZoneResponse>(
+    `/agent-zones/manual/${zoneId}`,
     {
       name: payload.name,
       description: payload.description,

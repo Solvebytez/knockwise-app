@@ -339,7 +339,18 @@ const ManualZoneModal: React.FC<ManualZoneModalProps> = ({
         notes: propertyForm.notes?.trim() || undefined,
       };
 
-      await apiInstance.post("/residents", payload);
+      console.log("📝 [ManualZoneModal] Saving property with payload:", {
+        zoneId: payload.zoneId,
+        address: payload.address,
+        houseNumber: payload.houseNumber,
+      });
+
+      const response = await apiInstance.post("/residents", payload);
+      
+      console.log("✅ [ManualZoneModal] Property saved successfully:", {
+        residentId: response.data?.data?._id,
+        zoneId: payload.zoneId,
+      });
 
       Alert.alert("Saved", "Property saved successfully.");
 

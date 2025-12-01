@@ -30,12 +30,9 @@ import {
 } from "@/lib/locationApi";
 import {
   createManualZone,
+  updateManualZone,
   type ManualZoneRecord,
 } from "@/lib/manualZoneApi";
-import {
-  updateAgentZone,
-  type UpdateAgentZonePayload,
-} from "@/lib/agentZoneApi";
 
 export interface ManualZoneContext {
   zoneId: string;
@@ -232,20 +229,18 @@ const ManualZoneDetailsModal: React.FC<ManualZoneDetailsModalProps> = ({
       
       if (isEditMode && initialValue?.zoneId) {
         console.log("📝 [ManualZoneDetailsModal] Updating zone with ID:", initialValue.zoneId);
-        // Update existing zone
-        const updatePayload: UpdateAgentZonePayload = {
+        // Update existing zone using mobile-specific endpoint
+        const updatePayload = {
           name: zoneName.trim(),
           description: zoneDescription.trim(),
           areaId: selectedArea.id,
           municipalityId: selectedMunicipality.id,
           communityId: selectedCommunity.id,
-          isNameDescriptionUpdateOnly: true,
         };
         
         console.log("📝 [ManualZoneDetailsModal] Update payload:", updatePayload);
-        const response = await updateAgentZone(initialValue.zoneId, updatePayload);
-        console.log("📝 [ManualZoneDetailsModal] Update response:", response);
-        const updatedZone = response.data;
+        const updatedZone = await updateManualZone(initialValue.zoneId, updatePayload);
+        console.log("📝 [ManualZoneDetailsModal] Update response:", updatedZone);
 
         const resolvedAreaName =
           typeof updatedZone.areaId === "object"

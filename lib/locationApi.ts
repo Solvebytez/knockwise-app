@@ -37,9 +37,7 @@ interface CommunitiesApiResponse {
 }
 
 export const fetchAreas = async (): Promise<Area[]> => {
-  const response = await apiInstance.get<AreasApiResponse>("/areas", {
-    _skipTokenCheck: true,
-  } as any);
+  const response = await apiInstance.get<AreasApiResponse>("/areas");
   return response.data?.data ?? [];
 };
 
@@ -50,8 +48,7 @@ export const fetchMunicipalitiesByArea = async (
     return [];
   }
   const response = await apiInstance.get<MunicipalitiesApiResponse>(
-    `/areas/${areaId}/municipalities`,
-    { _skipTokenCheck: true } as any
+    `/areas/${areaId}/municipalities`
   );
   return response.data?.data ?? [];
 };
@@ -63,8 +60,7 @@ export const fetchCommunitiesByMunicipality = async (
     return [];
   }
   const response = await apiInstance.get<CommunitiesApiResponse>(
-    `/municipalities/${municipalityId}/communities`,
-    { _skipTokenCheck: true } as any
+    `/municipalities/${municipalityId}/communities`
   );
   return response.data?.data ?? [];
 };
