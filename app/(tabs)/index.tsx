@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState, useEffect } from "react";
 import {
   View,
   StyleSheet,
@@ -17,6 +17,7 @@ import { getMyRoutes } from "@/lib/routeApi";
 import { useMyActivities, Activity } from "@/lib/activityApi";
 import { useAgentDashboardStats } from "@/lib/agentDashboardApi";
 import { getActivityColors } from "@/lib/activityColors";
+import { getMyNotVisitedResidents, Resident } from "@/lib/residentsApi";
 import {
   COLORS,
   SPACING,
@@ -175,6 +176,30 @@ export default function HomeScreen() {
       };
     });
   }, [dashboardData?.data?.todaySchedule, scheduleData?.routes]);
+
+  // SECTION 2.5: Not-Visited Properties - Independent Loading
+  const {
+    data: notVisitedResidents,
+    isLoading: isLoadingNotVisited,
+    isError: isErrorNotVisited,
+    refetch: refetchNotVisited,
+  } = useQuery({
+    queryKey: ["myNotVisitedResidents"],
+    queryFn: () => getMyNotVisitedResidents(3),
+    refetchOnWindowFocus: false,
+    retry: 2,
+  });
+
+  // Debug logging
+  useEffect(() => {
+    if (notVisitedResidents) {
+      console.log("📝 [HomeScreen] Not-visited residents data:", notVisitedResidents);
+      console.log("📝 [HomeScreen] Not-visited residents count:", notVisitedResidents.length);
+    }
+    if (isErrorNotVisited) {
+      console.error("❌ [HomeScreen] Not-visited residents error:", isErrorNotVisited);
+    }
+  }, [notVisitedResidents, isErrorNotVisited]);
 
   // SECTION 3: Recent Activities - Independent Loading
   // Use activities from dashboard stats, but also allow fallback to separate query
@@ -353,6 +378,7 @@ export default function HomeScreen() {
       await Promise.all([
         refetchStats(),
         refetchSchedule(),
+        refetchNotVisited(),
         refetchActivities(),
       ]);
     } catch (error) {
@@ -360,7 +386,7 @@ export default function HomeScreen() {
     } finally {
       setRefreshing(false);
     }
-  }, [refetchStats, refetchSchedule, refetchActivities]);
+  }, [refetchStats, refetchSchedule, refetchNotVisited, refetchActivities]);
 
   // Navigation handlers
   const handleViewAllRoutes = useCallback(() => {
@@ -369,6 +395,10 @@ export default function HomeScreen() {
 
   const handleSeeAllActivities = useCallback(() => {
     router.push("/(tabs)/activities");
+  }, [router]);
+
+  const handleViewAllLeads = useCallback(() => {
+    router.push("/my-leads");
   }, [router]);
 
   const handleStartKnocking = useCallback(() => {
@@ -753,72 +783,127 @@ export default function HomeScreen() {
           )}
         </View>
 
-        {/* Today's Schedule Section - Independent Loading */}
+        {/* Leads Section - Independent Loading */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <H3>Today&apos;s Schedule</H3>
-            <TouchableOpacity onPress={handleViewAllRoutes}>
+            <H3>Latest Leads</H3>
+            <TouchableOpacity onPress={handleViewAllLeads}>
               <Body2 color={COLORS.primary[500]}>View All</Body2>
             </TouchableOpacity>
           </View>
-          {isErrorSchedule ? (
+          {isErrorNotVisited ? (
             <View style={styles.errorContainer}>
               <Body2 color={COLORS.error[500]}>
-                Failed to load schedule. Pull down to refresh.
+                Failed to load leads. Pull down to refresh.
               </Body2>
             </View>
-          ) : isLoadingSchedule ? (
+          ) : isLoadingNotVisited ? (
             <View style={styles.sectionLoadingContainer}>
-              {[1, 2].map((i) => (
+              {[1, 2, 3].map((i) => (
                 <View
                   key={i}
-                  style={[styles.taskCard, styles.taskCardSkeleton]}
+                  style={[styles.leadCard, styles.leadCardSkeleton]}
                 >
                   <View style={styles.skeletonLine} />
                   <View style={styles.skeletonLine} />
+                  <View style={styles.skeletonLine} />
                 </View>
               ))}
             </View>
-          ) : upcomingTasks.length > 0 ? (
-            <View style={styles.tasksContainer}>
-              {upcomingTasks.map((task) => (
-                <View key={task.id} style={styles.taskCard}>
-                  <View style={styles.taskContent}>
-                    <View
-                      style={[
-                        styles.priorityBar,
-                        task.priority === "high"
-                          ? styles.priorityHigh
-                          : task.priority === "medium"
-                          ? styles.priorityMedium
-                          : styles.priorityLow,
-                      ]}
-                    />
-                    <View style={styles.taskInfo}>
-                      <Text
-                        variant="body1"
-                        weight="semiBold"
-                        color={COLORS.text.primary}
-                        style={{ marginBottom: responsiveSpacing(SPACING.xs) }}
-                      >
-                        {task.title}
-                      </Text>
-                      <View style={styles.taskMeta}>
-                        <Body2 color={COLORS.text.secondary}>{task.time}</Body2>
-                        <Body2 color={COLORS.text.secondary}> • </Body2>
-                        <Body2 color={COLORS.text.secondary}>
-                          {task.houses} houses
-                        </Body2>
+          ) : notVisitedResidents && notVisitedResidents.length > 0 ? (
+            <View style={styles.leadsContainer}>
+              {notVisitedResidents.map((resident) => {
+                const zoneName = typeof resident.zoneId === 'object' 
+                  ? resident.zoneId?.name || 'Unknown Zone'
+                  : 'Unknown Zone';
+                
+                // Status colors and display names
+                const statusColors: Record<string, string> = {
+                  "not-visited": "#EF4444",
+                  interested: "#F59E0B",
+                  visited: "#10B981",
+                  callback: "#8B5CF6",
+                  appointment: "#3B82F6",
+                  "follow-up": "#EC4899",
+                  "not-interested": "#6B7280",
+                };
+                
+                const getStatusDisplayName = (status: string): string => {
+                  const statusNames: Record<string, string> = {
+                    "not-visited": "Not Visited",
+                    interested: "Interested",
+                    visited: "Visited",
+                    callback: "Callback",
+                    appointment: "Appointment",
+                    "follow-up": "Follow-up",
+                    "not-interested": "Not Interested",
+                  };
+                  return statusNames[status] || status;
+                };
+                
+                const statusColor = statusColors[resident.status] || statusColors["visited"];
+                const statusDisplayName = getStatusDisplayName(resident.status);
+                
+                return (
+                  <TouchableOpacity 
+                    key={resident._id} 
+                    style={styles.leadCard}
+                    onPress={() => {
+                      // Navigate to property details or zone
+                      const zoneId = typeof resident.zoneId === 'object' 
+                        ? resident.zoneId._id 
+                        : resident.zoneId;
+                      router.push({
+                        pathname: "/manual-zone-form",
+                        params: { zoneId },
+                      });
+                    }}
+                  >
+                    <View style={styles.leadContent}>
+                      <View style={styles.leadHeader}>
+                        <View style={styles.leadInfo}>
+                          <Text
+                            variant="body1"
+                            weight="semiBold"
+                            color={COLORS.text.primary}
+                            style={{ marginBottom: responsiveSpacing(SPACING.xs / 2) }}
+                          >
+                            {resident.ownerName || resident.address || 'Unknown Property'}
+                          </Text>
+                          <Body2 color={COLORS.text.secondary} numberOfLines={1}>
+                            {resident.address}
+                          </Body2>
+                          <Body2 color={COLORS.text.secondary} style={{ fontSize: responsiveScale(11), marginTop: responsiveSpacing(SPACING.xs / 2) }}>
+                            {zoneName}
+                          </Body2>
+                        </View>
+                        <View style={[styles.leadStatusBadge, { backgroundColor: `${statusColor}15` }]}>
+                          <Body2 color={statusColor} weight="medium" style={{ fontSize: responsiveScale(11) }}>
+                            {statusDisplayName}
+                          </Body2>
+                        </View>
                       </View>
+                      {resident.phone && (
+                        <View style={styles.leadMeta}>
+                          <MaterialIcons 
+                            name="phone" 
+                            size={responsiveScale(14)} 
+                            color={COLORS.text.secondary} 
+                          />
+                          <Body2 color={COLORS.text.secondary} style={{ marginLeft: responsiveSpacing(SPACING.xs / 2) }}>
+                            {resident.phone}
+                          </Body2>
+                        </View>
+                      )}
                     </View>
-                  </View>
-                </View>
-              ))}
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           ) : (
             <View style={styles.emptyStateContainer}>
               <Body2 color={COLORS.text.secondary}>
-                No scheduled tasks for today
+                No leads available
               </Body2>
             </View>
           )}
@@ -1383,6 +1468,45 @@ const styles = StyleSheet.create({
   taskCardSkeleton: {
     backgroundColor: COLORS.neutral[100],
     minHeight: responsiveScale(80),
+  },
+  leadsContainer: {
+    gap: responsiveSpacing(SPACING.md),
+  },
+  leadCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: responsiveScale(12),
+    padding: responsiveSpacing(SPACING.md),
+    shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  leadCardSkeleton: {
+    backgroundColor: COLORS.neutral[100],
+    minHeight: responsiveScale(100),
+  },
+  leadContent: {
+    gap: responsiveSpacing(SPACING.sm),
+  },
+  leadHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: responsiveSpacing(SPACING.sm),
+  },
+  leadInfo: {
+    flex: 1,
+  },
+  leadStatusBadge: {
+    paddingHorizontal: responsiveSpacing(SPACING.sm),
+    paddingVertical: responsiveSpacing(SPACING.xs / 2),
+    borderRadius: responsiveScale(12),
+  },
+  leadMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: responsiveSpacing(SPACING.xs / 2),
   },
   activityDotSkeleton: {
     backgroundColor: COLORS.neutral[200],
