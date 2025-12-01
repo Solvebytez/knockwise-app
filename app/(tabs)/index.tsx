@@ -5,6 +5,8 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  Modal,
+  Pressable,
 } from "react-native";
 import { Image } from "expo-image";
 import { StatusBar } from "expo-status-bar";
@@ -23,6 +25,7 @@ import {
   responsiveScale,
 } from "@/constants";
 import { Text, H2, H3, Body2 } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { SideDrawer } from "@/components/ui/SideDrawer";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 
@@ -31,6 +34,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [isStartKnockingModalOpen, setIsStartKnockingModalOpen] = useState(false);
 
   // Get today's date in YYYY-MM-DD format
   const getTodayDate = () => {
@@ -65,11 +69,37 @@ export default function HomeScreen() {
         territories: 0,
         routes: 0,
         totalVisitsToday: 0,
+        totalVisitsYesterday: 0,
         leadsCreatedToday: 0,
+        completedVisitsToday: 0,
+        pendingVisitsToday: 0,
         totalPropertiesInCreatedZones: 0,
+        totalZonesCreatedByUser: 0,
       }
     );
   }, [dashboardData?.data?.stats]);
+
+  // Calculate performance percentage change
+  const performanceChange = useMemo(() => {
+    const yesterday = agentStats.totalVisitsYesterday || 0;
+    const today = agentStats.totalVisitsToday || 0;
+    
+    // Check if values are equal
+    if (yesterday === today) {
+      return { percentage: 0, isPositive: false, isEqual: true };
+    }
+    
+    if (yesterday === 0) {
+      return today > 0 ? { percentage: 100, isPositive: true, isEqual: false } : { percentage: 0, isPositive: false, isEqual: true };
+    }
+    
+    const change = ((today - yesterday) / yesterday) * 100;
+    return {
+      percentage: Math.abs(Math.round(change)),
+      isPositive: change > 0,
+      isEqual: false,
+    };
+  }, [agentStats.totalVisitsYesterday, agentStats.totalVisitsToday]);
 
   // SECTION 2: Today's Schedule - Independent Loading
   // Use schedule from dashboard stats, but also allow fallback to separate query
@@ -341,6 +371,24 @@ export default function HomeScreen() {
     router.push("/(tabs)/activities");
   }, [router]);
 
+  const handleStartKnocking = useCallback(() => {
+    setIsStartKnockingModalOpen(true);
+  }, []);
+
+  const handleCloseStartKnockingModal = useCallback(() => {
+    setIsStartKnockingModalOpen(false);
+  }, []);
+
+  const handleCreateManualZone = useCallback(() => {
+    setIsStartKnockingModalOpen(false);
+    router.push("/manual-zone-form");
+  }, [router]);
+
+  const handleCreateAutoZone = useCallback(() => {
+    setIsStartKnockingModalOpen(false);
+    router.push("/create-zone?type=auto");
+  }, [router]);
+
   const menuItems = useMemo(
     () => [
       {
@@ -455,6 +503,24 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        {/* Start Knocking Button */}
+        <View style={styles.startKnockingContainer}>
+          <Button
+            title="Start Knocking"
+            variant="primary"
+            size="large"
+            fullWidth
+            leftIcon={
+              <MaterialIcons
+                name="door-front"
+                size={responsiveScale(20)}
+                color={COLORS.white}
+              />
+            }
+            onPress={handleStartKnocking}
+          />
+        </View>
+
         {/* Stats Cards - Independent Loading */}
         <View style={styles.statsContainer}>
           {isErrorStats ? (
@@ -491,54 +557,135 @@ export default function HomeScreen() {
               contentContainerStyle={styles.statsScrollContent}
               style={styles.statsScrollView}
             >
-              <View style={[styles.statCard, styles.statCard1]}>
+              {/* Performance Card - Position 1 */}
+              <View style={[styles.statCard, styles.statCard0, styles.performanceCard]}>
                 <View style={styles.statHeader}>
                   <MaterialIcons
-                    name="checklist"
+                    name={
+                      performanceChange.isEqual
+                        ? "trending-flat"
+                        : performanceChange.isPositive
+                        ? "trending-up"
+                        : "trending-down"
+                    }
                     size={responsiveScale(20)}
-                    color={COLORS.primary[600]}
+                    color={
+                      performanceChange.isEqual
+                        ? COLORS.warning[600]
+                        : performanceChange.isPositive
+                        ? COLORS.success[600]
+                        : COLORS.error[500]
+                    }
                   />
                   <Text
                     variant="body2"
                     color={COLORS.text.secondary}
                     style={styles.statLabel}
                   >
-                    Activities Today
+                    Performance
                   </Text>
                 </View>
-                <Text
-                  variant="h1"
-                  color={COLORS.text.primary}
-                  weight="bold"
-                  style={styles.statValue}
-                >
-                  {agentStats.todayTasks}
-                </Text>
+                <View style={styles.performanceContent}>
+                  <View style={styles.performanceNumbers}>
+                    <View style={styles.performanceRow}>
+                      <Body2 color={COLORS.text.secondary} style={styles.performanceLabel}>
+                        Yesterday:
+                      </Body2>
+                      <Body2 color={COLORS.text.primary} weight="semiBold">
+                        {agentStats.totalVisitsYesterday || 0}
+                      </Body2>
+                    </View>
+                    <View style={styles.performanceRow}>
+                      <Body2 color={COLORS.text.secondary} style={styles.performanceLabel}>
+                        Today:
+                      </Body2>
+                      <Body2 color={COLORS.text.primary} weight="semiBold">
+                        {agentStats.totalVisitsToday || 0}
+                      </Body2>
+                    </View>
+                  </View>
+                  <View style={styles.performanceChange}>
+                    <MaterialIcons
+                      name={
+                        performanceChange.isEqual
+                          ? "remove"
+                          : performanceChange.isPositive
+                          ? "arrow-upward"
+                          : "arrow-downward"
+                      }
+                      size={responsiveScale(16)}
+                      color={
+                        performanceChange.isEqual
+                          ? COLORS.warning[600]
+                          : performanceChange.isPositive
+                          ? COLORS.success[600]
+                          : COLORS.error[500]
+                      }
+                    />
+                    <Text
+                      variant="body2"
+                      color={
+                        performanceChange.isEqual
+                          ? COLORS.warning[600]
+                          : performanceChange.isPositive
+                          ? COLORS.success[600]
+                          : COLORS.error[500]
+                      }
+                      weight="semiBold"
+                    >
+                      {performanceChange.isEqual
+                        ? "0%"
+                        : performanceChange.isPositive
+                        ? `+${performanceChange.percentage}%`
+                        : `-${performanceChange.percentage}%`}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.performanceGraphIcon}>
+                  <MaterialIcons
+                    name="show-chart"
+                    size={responsiveScale(24)}
+                    color={
+                      performanceChange.isEqual
+                        ? COLORS.warning[400]
+                        : performanceChange.isPositive
+                        ? COLORS.success[400]
+                        : COLORS.error[400]
+                    }
+                  />
+                </View>
               </View>
 
               <View style={[styles.statCard, styles.statCard2]}>
-                <View style={styles.statHeader}>
-                  <MaterialIcons
-                    name="domain"
-                    size={responsiveScale(20)}
-                    color={COLORS.success[600]}
-                  />
+                <View>
+                  <View style={styles.statHeader}>
+                    <MaterialIcons
+                      name="domain"
+                      size={responsiveScale(20)}
+                      color={COLORS.success[600]}
+                    />
+                    <Text
+                      variant="body2"
+                      color={COLORS.text.secondary}
+                      style={styles.statLabel}
+                    >
+                      Total Properties
+                    </Text>
+                  </View>
                   <Text
-                    variant="body2"
-                    color={COLORS.text.secondary}
-                    style={styles.statLabel}
+                    variant="h1"
+                    color={COLORS.text.primary}
+                    weight="bold"
+                    style={styles.statValue}
                   >
-                    Total Properties
+                    {agentStats.totalPropertiesInCreatedZones || 0}
                   </Text>
                 </View>
-                <Text
-                  variant="h1"
-                  color={COLORS.text.primary}
-                  weight="bold"
-                  style={styles.statValue}
-                >
-                  {agentStats.totalPropertiesInCreatedZones || 0}
-                </Text>
+                <View style={styles.statFooter}>
+                  <Body2 color={COLORS.text.secondary}>
+                    {agentStats.totalZonesCreatedByUser || 0} zones
+                  </Body2>
+                </View>
               </View>
 
               <View style={[styles.statCard, styles.statCard3]}>
@@ -572,31 +719,33 @@ export default function HomeScreen() {
               </View>
 
               <View style={[styles.statCard, styles.statCard4]}>
-                <View style={styles.statHeader}>
-                  <MaterialIcons
-                    name="home"
-                    size={responsiveScale(20)}
-                    color={COLORS.purple[600]}
-                  />
+                <View>
+                  <View style={styles.statHeader}>
+                    <MaterialIcons
+                      name="home"
+                      size={responsiveScale(20)}
+                      color={COLORS.purple[600]}
+                    />
+                    <Text
+                      variant="body2"
+                      color={COLORS.text.secondary}
+                      style={styles.statLabel}
+                    >
+                      Visits Today
+                    </Text>
+                  </View>
                   <Text
-                    variant="body2"
-                    color={COLORS.text.secondary}
-                    style={styles.statLabel}
+                    variant="h1"
+                    color={COLORS.text.primary}
+                    weight="bold"
+                    style={styles.statValue}
                   >
-                    Visits Today
+                    {agentStats.totalVisitsToday || 0}
                   </Text>
                 </View>
-                <Text
-                  variant="h1"
-                  color={COLORS.text.primary}
-                  weight="bold"
-                  style={styles.statValue}
-                >
-                  {agentStats.totalVisitsToday || 0}
-                </Text>
                 <View style={styles.statFooter}>
                   <Body2 color={COLORS.success[600]}>
-                    {agentStats.leadsCreatedToday || 0} leads
+                    {agentStats.completedVisitsToday || 0} completed
                   </Body2>
                 </View>
               </View>
@@ -720,23 +869,12 @@ export default function HomeScreen() {
                     (a) => a._id === activity.id
                   ) || activitiesData?.data?.find((a) => a._id === activity.id);
 
-                console.log("🏠 Home Screen - Activity:", {
-                  activityId: activity.id,
-                  activityTitle: activity.title,
-                  hasOriginalActivity: !!originalActivity,
-                  originalActivityType: originalActivity?.activityType,
-                  originalResponse: originalActivity?.response,
-                  originalOperationType: originalActivity?.operationType,
-                });
-
                 const colors = originalActivity
                   ? getActivityColors(originalActivity)
                   : {
                       dotColor: COLORS.neutral[500],
                       backgroundColor: COLORS.neutral[50],
                     };
-
-                console.log("🏠 Home Screen - Colors assigned:", colors);
 
                 return (
                   <View key={activity.id} style={styles.activityItem}>
@@ -805,6 +943,76 @@ export default function HomeScreen() {
           ))}
         </View>
       </SideDrawer>
+
+      {/* Start Knocking Modal */}
+      <Modal
+        visible={isStartKnockingModalOpen}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={handleCloseStartKnockingModal}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={handleCloseStartKnockingModal}
+        >
+          <Pressable
+            style={styles.modalContent}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.modalHeader}>
+              <H3>Start Knocking</H3>
+              <TouchableOpacity
+                onPress={handleCloseStartKnockingModal}
+                style={styles.modalCloseButton}
+              >
+                <MaterialIcons
+                  name="close"
+                  size={responsiveScale(24)}
+                  color={COLORS.text.primary}
+                />
+              </TouchableOpacity>
+            </View>
+            <Body2
+              color={COLORS.text.secondary}
+              style={styles.modalDescription}
+            >
+              Choose how you want to create your zone
+            </Body2>
+            <View style={styles.modalButtonsContainer}>
+              <Button
+                title="Create Manual Zone"
+                variant="primary"
+                size="large"
+                fullWidth
+                leftIcon={
+                  <MaterialIcons
+                    name="edit"
+                    size={responsiveScale(20)}
+                    color={COLORS.white}
+                  />
+                }
+                onPress={handleCreateManualZone}
+                containerStyle={styles.modalButton}
+              />
+              <Button
+                title="Create Auto Zone"
+                variant="outline"
+                size="large"
+                fullWidth
+                leftIcon={
+                  <MaterialIcons
+                    name="auto-awesome"
+                    size={responsiveScale(20)}
+                    color={COLORS.primary[500]}
+                  />
+                }
+                onPress={handleCreateAutoZone}
+                containerStyle={styles.modalButton}
+              />
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -849,8 +1057,8 @@ const styles = StyleSheet.create({
     gap: responsiveSpacing(SPACING.sm),
   },
   logo: {
-    width: responsiveScale(100),
-    height: responsiveScale(32),
+    width: responsiveScale(140),
+    height: responsiveScale(45),
   },
   iconButton: {
     width: responsiveScale(40),
@@ -980,14 +1188,19 @@ const styles = StyleSheet.create({
     paddingBottom: responsiveSpacing(SPACING.lg + SPACING.xs),
     borderRadius: responsiveScale(16),
     width: responsiveScale(140),
+    minHeight: responsiveScale(140), // Ensure consistent card height
     shadowColor: COLORS.black,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 2,
+    justifyContent: "space-between", // Distribute content evenly
   },
-  statCard1: {
-    backgroundColor: COLORS.primary[100],
+  statCard0: {
+    backgroundColor: COLORS.neutral[50],
+  },
+  performanceCard: {
+    position: "relative",
   },
   statCard2: {
     backgroundColor: COLORS.success[100],
@@ -1016,10 +1229,41 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: responsiveSpacing(SPACING.xs / 2),
   },
+  statFooterSpacer: {
+    height: responsiveScale(20), // Match footer height for consistent spacing
+  },
   statFooterFirst: {
     flexDirection: "column",
     alignItems: "flex-start",
     gap: responsiveSpacing(SPACING.xs / 2),
+  },
+  performanceContent: {
+    flex: 1,
+    justifyContent: "space-between",
+  },
+  performanceNumbers: {
+    gap: responsiveSpacing(SPACING.xs / 2),
+    marginBottom: responsiveSpacing(SPACING.xs),
+  },
+  performanceRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  performanceLabel: {
+    fontSize: responsiveScale(11),
+  },
+  performanceChange: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: responsiveSpacing(SPACING.xs / 2),
+    marginTop: responsiveSpacing(SPACING.xs),
+  },
+  performanceGraphIcon: {
+    position: "absolute",
+    bottom: responsiveSpacing(SPACING.sm),
+    right: responsiveSpacing(SPACING.sm),
+    opacity: 0.3,
   },
   section: {
     paddingHorizontal: responsiveSpacing(PADDING.screenLarge),
@@ -1160,5 +1404,46 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.error[50],
     borderRadius: responsiveScale(12),
     marginVertical: responsiveSpacing(SPACING.sm),
+  },
+  startKnockingContainer: {
+    paddingHorizontal: responsiveSpacing(PADDING.screenLarge),
+    marginBottom: responsiveSpacing(SPACING.md),
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: responsiveSpacing(PADDING.screenLarge),
+  },
+  modalContent: {
+    backgroundColor: COLORS.white,
+    borderRadius: responsiveScale(16),
+    width: "100%",
+    maxWidth: responsiveScale(400),
+    padding: responsiveSpacing(SPACING.lg),
+    shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: responsiveSpacing(SPACING.sm),
+  },
+  modalCloseButton: {
+    padding: responsiveSpacing(SPACING.xs),
+  },
+  modalDescription: {
+    marginBottom: responsiveSpacing(SPACING.lg),
+  },
+  modalButtonsContainer: {
+    gap: responsiveSpacing(SPACING.md),
+  },
+  modalButton: {
+    marginBottom: 0,
   },
 });

@@ -193,6 +193,33 @@ apiInstance.interceptors.request.use(
             if (newAccessToken) {
               config.headers.Authorization = `Bearer ${newAccessToken}`;
               console.log("✅ Token refreshed proactively, using new token");
+              
+              // Reload CSRF token after refresh (backend generates new CSRF token on refresh)
+              if (config.method && config.method.toLowerCase() !== "get") {
+                const updatedCsrf = await loadCsrfToken();
+                if (updatedCsrf?.token) {
+                  config.headers["X-CSRF-Token"] = updatedCsrf.token;
+                  console.log(
+                    "🛡️ CSRF: Token reloaded after refresh",
+                    updatedCsrf.token.substring(0, 8),
+                    "..."
+                  );
+                }
+                if (updatedCsrf?.cookie) {
+                  const existingCookieHeader =
+                    config.headers.Cookie || (config.headers as any).cookie;
+                  const combinedCookie = existingCookieHeader
+                    ? `${existingCookieHeader}; ${updatedCsrf.cookie}`
+                    : updatedCsrf.cookie;
+                  config.headers.Cookie = combinedCookie;
+                  (config.headers as any).cookie = combinedCookie;
+                  console.log(
+                    "🍪 CSRF: Cookie reloaded after refresh",
+                    updatedCsrf.cookie.split("=")[1]?.substring(0, 8),
+                    "..."
+                  );
+                }
+              }
             } else {
               // Fallback to original token if refresh succeeded but no new token found
               console.warn(
@@ -262,14 +289,42 @@ apiInstance.interceptors.response.use(
           );
           if (newAccessToken) {
             originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+            
+            // Reload CSRF token after refresh (backend generates new CSRF token on refresh)
+            if (originalRequest.method && originalRequest.method.toLowerCase() !== "get") {
+              const updatedCsrf = await loadCsrfToken();
+              if (updatedCsrf?.token) {
+                originalRequest.headers["X-CSRF-Token"] = updatedCsrf.token;
+                console.log(
+                  "🛡️ CSRF: Token reloaded after refresh (401 retry)",
+                  updatedCsrf.token.substring(0, 8),
+                  "..."
+                );
+              }
+              if (updatedCsrf?.cookie) {
+                const existingCookieHeader =
+                  originalRequest.headers.Cookie || (originalRequest.headers as any).cookie;
+                const combinedCookie = existingCookieHeader
+                  ? `${existingCookieHeader}; ${updatedCsrf.cookie}`
+                  : updatedCsrf.cookie;
+                originalRequest.headers.Cookie = combinedCookie;
+                (originalRequest.headers as any).cookie = combinedCookie;
+                console.log(
+                  "🍪 CSRF: Cookie reloaded after refresh (401 retry)",
+                  updatedCsrf.cookie.split("=")[1]?.substring(0, 8),
+                  "..."
+                );
+              }
+            }
+            
             console.log("✅ Token refreshed, retrying original request");
             return apiInstance(originalRequest); // Retry the original request
           } else {
-            // Fallback to original token if refresh succeeded but no new token found
+            // Fallback: refresh succeeded but no new token found
             console.warn(
-              "⚠️ Refresh succeeded but no new token found, using original"
+              "⚠️ Refresh succeeded but no new token found"
             );
-            originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+            return Promise.reject(error);
           }
         } else {
           // Refresh failed, reject the original request

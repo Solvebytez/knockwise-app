@@ -931,21 +931,54 @@ export default function CreateZoneScreen({
 
     try {
       setIsLoadingSearchSuggestions(true);
-      const response = await fetch(
-        `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
-          trimmed
-        )}&key=${GOOGLE_PLACES_API_KEY}&types=address&components=country:ca`
-      );
+      
+      let apiKey = getGoogleMapsApiKey();
+      
+      // Fallback to hardcoded key if not found (for real device compatibility)
+      if (!apiKey) {
+        console.warn("⚠️ Google Maps API key not found in config, using fallback key");
+        apiKey = "AIzaSyCe1aICpk2SmN3ArHwp-79FnsOk38k072M";
+      }
+
+      if (!apiKey) {
+        throw new Error("Google Maps API key not configured");
+      }
+
+      const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
+        trimmed
+      )}&key=${apiKey}&types=address&components=country:ca`;
+
+      console.log("🔍 Fetching location suggestions for:", trimmed.substring(0, 50) + "...");
+      
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        console.error("❌ Address suggestions API response not OK:", response.status, response.statusText);
+        throw new Error(`Address suggestions API request failed: ${response.status} ${response.statusText}`);
+      }
+      
       const data = await response.json();
+      
+      console.log("📊 Address suggestions API response status:", data.status);
 
       if (data.status === "OK" && Array.isArray(data.predictions)) {
+        console.log("✅ Found", data.predictions.length, "location suggestions");
         setSearchSuggestions(data.predictions);
         setShowSearchSuggestions(true);
+      } else if (data.status === "ZERO_RESULTS") {
+        console.log("ℹ️ No location suggestions found");
+        setSearchSuggestions([]);
+        setShowSearchSuggestions(false);
+      } else if (data.status === "REQUEST_DENIED") {
+        console.error("❌ Address suggestions API request denied:", data.error_message || "Unknown error");
+        setSearchSuggestions([]);
+        setShowSearchSuggestions(false);
       } else {
+        console.warn("⚠️ Address suggestions API returned status:", data.status, data.error_message);
         setSearchSuggestions([]);
         setShowSearchSuggestions(false);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error(
         "[CreateZone] Failed to fetch location suggestions:",
         error
@@ -1035,19 +1068,52 @@ export default function CreateZoneScreen({
         setIsSearchingLocation(true);
         
         // Use Google Geocoding API instead of expo-location to avoid permission issues
-        const apiKey = getGoogleMapsApiKey();
+        let apiKey = getGoogleMapsApiKey();
+        
+        // Fallback to hardcoded key if not found (for real device compatibility)
+        if (!apiKey) {
+          console.warn("⚠️ Google Maps API key not found in config, using fallback key");
+          apiKey = "AIzaSyCe1aICpk2SmN3ArHwp-79FnsOk38k072M";
+        }
+
         if (!apiKey) {
           throw new Error("Google Maps API key not configured");
         }
 
         const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(trimmed)}&key=${apiKey}`;
+        
+        console.log("🔍 Geocoding location:", trimmed.substring(0, 50) + "...");
+        
         const response = await fetch(geocodeUrl);
+        
+        if (!response.ok) {
+          console.error("❌ Geocoding API response not OK:", response.status, response.statusText);
+          throw new Error(`Geocoding API request failed: ${response.status} ${response.statusText}`);
+        }
+        
         const data = await response.json();
+        
+        console.log("📊 Geocoding API response status:", data.status);
 
-        if (data.status !== "OK" || !data.results || data.results.length === 0) {
+        if (data.status === "ZERO_RESULTS") {
+          console.warn("⚠️ No results found for location:", trimmed);
           Alert.alert(
             "Location not found",
             "Try a different address or place."
+          );
+          return;
+        }
+
+        if (data.status === "REQUEST_DENIED") {
+          console.error("❌ Geocoding API request denied:", data.error_message || "Unknown error");
+          throw new Error(`Geocoding API request denied: ${data.error_message || "Check API key configuration"}`);
+        }
+
+        if (data.status !== "OK" || !data.results || data.results.length === 0) {
+          console.error("❌ Geocoding API error:", data.status, data.error_message);
+          Alert.alert(
+            "Location not found",
+            data.error_message || "Try a different address or place."
           );
           return;
         }
@@ -1134,11 +1200,12 @@ export default function CreateZoneScreen({
 
         setShowSearchSuggestions(false);
         setSearchSuggestions([]);
-      } catch (error) {
+      } catch (error: any) {
         console.error("[CreateZone] Failed to search location:", error);
+        const errorMessage = error.message || "We couldn't find that place. Please try again.";
         Alert.alert(
           "Location search failed",
-          "We couldn't find that place. Please try again."
+          errorMessage
         );
       } finally {
         setIsSearchingLocation(false);
@@ -1434,6 +1501,9 @@ export default function CreateZoneScreen({
 
       // Invalidate territories query to refresh the list with updated data
       queryClient.invalidateQueries({ queryKey: ["myTerritories"] });
+      
+      // Invalidate agent dashboard stats to refresh home screen cards
+      queryClient.invalidateQueries({ queryKey: ["agentDashboardStats"] });
 
       // Automatically redirect to my territory list screen with updated data
       router.replace("/(tabs)/my-territory");
@@ -1526,7 +1596,12 @@ export default function CreateZoneScreen({
   );
 
   const handleStartDrawing = useCallback(() => {
-    if (pendingTerritory?.polygon?.length) {
+    // In edit mode, always start fresh (empty drawing) so new points don't join existing markers
+    // The existing polygon will remain visible as pendingTerritory.polygon for reference
+    if (isEditMode) {
+      resetDrawingState();
+      setHasStartedEditing(true);
+    } else if (pendingTerritory?.polygon?.length) {
       setCurrentDrawing(pendingTerritory.polygon);
       setResidentsInDrawing(pendingTerritory.residents);
       setHasStartedEditing(false);
@@ -1538,6 +1613,7 @@ export default function CreateZoneScreen({
     setValidationErrors([]);
     setDrawingMode(true);
   }, [
+    isEditMode,
     pendingTerritory?.polygon,
     pendingTerritory?.residents,
     resetDrawingState,
@@ -2308,7 +2384,13 @@ export default function CreateZoneScreen({
         </View>
       </View>
 
-      <View style={styles.bottomSheet}>
+      <View style={[
+        styles.bottomSheet,
+        pendingTerritory && workflowStep === "saving" && {
+          top: insets.top,
+          bottom: 0,
+        }
+      ]}>
         {isLoadingTerritory ? (
           <View style={[styles.stepCard, styles.centeredCard]}>
             <ActivityIndicator size="large" color={COLORS.primary[500]} />
@@ -2473,175 +2555,191 @@ export default function CreateZoneScreen({
             )}
           </View>
         ) : pendingTerritory ? (
-          <View style={styles.stepCard}>
-            <H3 style={styles.reviewTitle}>
-              {isEditMode ? "Review & Update" : "Review & Save"}
-            </H3>
-            <Body2 color={COLORS.text.secondary} style={styles.reviewSubtitle}>
-              {isEditMode
-                ? "Double-check details before saving your updates."
-                : "Name your territory and confirm the detected residents."}
-            </Body2>
+          <View style={[styles.stepCard, styles.reviewStepCard, { 
+            marginTop: -insets.top, 
+            paddingTop: insets.top + responsiveSpacing(SPACING.md),
+            paddingBottom: insets.bottom + responsiveSpacing(SPACING.md),
+            flex: 1,
+          }]}>
+            <View style={styles.reviewHeader}>
+              <H3 style={styles.reviewTitle}>
+                {isEditMode ? "Review & Update" : "Review & Save"}
+              </H3>
+              <Body2 color={COLORS.text.secondary} style={styles.reviewSubtitle}>
+                {isEditMode
+                  ? "Double-check details before saving your updates."
+                  : "Name your territory and confirm the detected residents."}
+              </Body2>
+            </View>
 
-            {validationWarnings.length > 0 && (
-              <View style={[styles.callout, styles.warningCallout]}>
-                {validationWarnings.map((warning, index) => (
-                  <Body3
-                    key={`${warning}-${index}`}
-                    color={warningColor}
-                    style={styles.calloutText}
-                  >
-                    {warning}
-                  </Body3>
-                ))}
-              </View>
-            )}
-
-            <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <Body2 weight="bold">Summary</Body2>
-                <Body3 color={COLORS.text.secondary}>
-                  Quick snapshot of this territory
-                </Body3>
-              </View>
-              <View style={styles.metricRow}>
-                <View style={styles.metricCard}>
-                  <Text weight="semiBold" style={styles.metricValue}>
-                    {pendingTerritory.residents.length}
-                  </Text>
-                  <Body3 style={styles.metricLabel}>Residents detected</Body3>
-                </View>
-                <View style={styles.metricCard}>
-                  <Text weight="semiBold" style={styles.metricValue}>
-                    {pendingTerritory.detectedBuildings.length}
-                  </Text>
-                  <Body3 style={styles.metricLabel}>Buildings identified</Body3>
-                </View>
-              </View>
-              {pendingTerritory.duplicateAddresses.length > 0 && (
-                <View style={styles.metricNotice}>
-                  <Body3 color={COLORS.warning[700]}>
-                    {pendingTerritory.duplicateAddresses.length} building
-                    {pendingTerritory.duplicateAddresses.length > 1
-                      ? "s"
-                      : ""}{" "}
-                    already assigned elsewhere.
-                  </Body3>
+            <ScrollView
+              style={styles.reviewScrollView}
+              contentContainerStyle={styles.reviewScrollContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled={true}
+            >
+              {validationWarnings.length > 0 && (
+                <View style={[styles.callout, styles.warningCallout]}>
+                  {validationWarnings.map((warning, index) => (
+                    <Body3
+                      key={`${warning}-${index}`}
+                      color={warningColor}
+                      style={styles.calloutText}
+                    >
+                      {warning}
+                    </Body3>
+                  ))}
                 </View>
               )}
-            </View>
 
-            <View style={styles.section}>
-              <Body2 weight="bold" style={styles.sectionHeaderTitle}>
-                Details
-              </Body2>
-
-              <View style={styles.inputGroup}>
-                <Body3 weight="medium" color={COLORS.text.secondary}>
-                  Territory Name *
-                </Body3>
-                <TextInput
-                  value={territoryName}
-                  onChangeText={setTerritoryName}
-                  placeholder="Enter territory name"
-                  placeholderTextColor={COLORS.text.light}
-                  style={styles.textInput}
-                  maxLength={120}
-                />
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Body2 weight="bold">Summary</Body2>
+                  <Body3 color={COLORS.text.secondary}>
+                    Quick snapshot of this territory
+                  </Body3>
+                </View>
+                <View style={styles.metricRow}>
+                  <View style={styles.metricCard}>
+                    <Text weight="semiBold" style={styles.metricValue}>
+                      {pendingTerritory.residents.length}
+                    </Text>
+                    <Body3 style={styles.metricLabel}>Residents detected</Body3>
+                  </View>
+                  <View style={styles.metricCard}>
+                    <Text weight="semiBold" style={styles.metricValue}>
+                      {pendingTerritory.detectedBuildings.length}
+                    </Text>
+                    <Body3 style={styles.metricLabel}>Buildings identified</Body3>
+                  </View>
+                </View>
+                {pendingTerritory.duplicateAddresses.length > 0 && (
+                  <View style={styles.metricNotice}>
+                    <Body3 color={COLORS.warning[700]}>
+                      {pendingTerritory.duplicateAddresses.length} building
+                      {pendingTerritory.duplicateAddresses.length > 1
+                        ? "s"
+                        : ""}{" "}
+                      already assigned elsewhere.
+                    </Body3>
+                  </View>
+                )}
               </View>
 
-              <View style={styles.inputGroup}>
-                <Body3 weight="medium" color={COLORS.text.secondary}>
-                  Description
-                </Body3>
-                <TextInput
-                  value={territoryDescription}
-                  onChangeText={setTerritoryDescription}
-                  placeholder="Optional description"
-                  placeholderTextColor={COLORS.text.light}
-                  style={[styles.textInput, styles.descriptionInput]}
-                  multiline
-                  numberOfLines={3}
-                  maxLength={500}
-                />
-                <Body3 style={styles.helperText}>
-                  {territoryDescription.length}/500
-                </Body3>
-              </View>
-            </View>
+              <View style={styles.section}>
+                <Body2 weight="bold" style={styles.sectionHeaderTitle}>
+                  Details
+                </Body2>
 
-            <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <Body2 weight="bold">Location</Body2>
+                <View style={styles.inputGroup}>
+                  <Body3 weight="medium" color={COLORS.text.secondary}>
+                    Territory Name *
+                  </Body3>
+                  <TextInput
+                    value={territoryName}
+                    onChangeText={setTerritoryName}
+                    placeholder="Enter territory name"
+                    placeholderTextColor={COLORS.text.light}
+                    style={styles.textInput}
+                    maxLength={120}
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Body3 weight="medium" color={COLORS.text.secondary}>
+                    Description
+                  </Body3>
+                  <TextInput
+                    value={territoryDescription}
+                    onChangeText={setTerritoryDescription}
+                    placeholder="Optional description"
+                    placeholderTextColor={COLORS.text.light}
+                    style={[styles.textInput, styles.descriptionInput]}
+                    multiline
+                    numberOfLines={3}
+                    maxLength={500}
+                  />
+                  <Body3 style={styles.helperText}>
+                    {territoryDescription.length}/500
+                  </Body3>
+                </View>
+              </View>
+
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Body2 weight="bold">Location</Body2>
+                  <Button
+                    variant="outline"
+                    size="small"
+                    title="Choose Location"
+                    onPress={handleOpenLocationModal}
+                  />
+                </View>
+                <View style={styles.locationGrid}>
+                  <View style={styles.locationItem}>
+                    <Body3 color={COLORS.text.secondary}>Area</Body3>
+                    <Text weight="semiBold">
+                      {selectedAreaName || "Not assigned"}
+                    </Text>
+                  </View>
+                  <View style={styles.locationItem}>
+                    <Body3 color={COLORS.text.secondary}>Municipality</Body3>
+                    <Text weight="semiBold">
+                      {selectedMunicipalityName || "Not assigned"}
+                    </Text>
+                  </View>
+                  <View style={styles.locationItem}>
+                    <Body3 color={COLORS.text.secondary}>Community</Body3>
+                    <Text weight="semiBold">
+                      {selectedCommunityName || "Not assigned"}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            </ScrollView>
+            
+            {workflowStep === "saving" && pendingTerritory && (
+              <View
+                style={[
+                  styles.saveActionsFixed,
+                  {
+                    paddingBottom: insets.bottom || responsiveSpacing(SPACING.sm),
+                  },
+                ]}
+              >
                 <Button
+                  title={isEditMode ? "Edit Boundary" : "Back to Drawing"}
+                  onPress={() => {
+                    setWorkflowStep("drawing");
+                    setDrawingMode(false);
+                    setValidationWarnings([]);
+                    setValidationErrors([]);
+                  }}
                   variant="outline"
-                  size="small"
-                  title="Choose Location"
-                  onPress={handleOpenLocationModal}
+                  containerStyle={styles.saveButton}
+                />
+                <Button
+                  title={
+                    isSavingZone
+                      ? "Saving..."
+                      : isEditMode
+                      ? "Save Changes"
+                      : "Save & Assign"
+                  }
+                  onPress={handleSaveZone}
+                  disabled={
+                    territoryName.trim().length === 0 ||
+                    isSavingZone ||
+                    pendingTerritory === null ||
+                    !isLocationSelectionComplete
+                  }
+                  containerStyle={styles.saveButton}
                 />
               </View>
-              <View style={styles.locationGrid}>
-                <View style={styles.locationItem}>
-                  <Body3 color={COLORS.text.secondary}>Area</Body3>
-                  <Text weight="semiBold">
-                    {selectedAreaName || "Not assigned"}
-                  </Text>
-                </View>
-                <View style={styles.locationItem}>
-                  <Body3 color={COLORS.text.secondary}>Municipality</Body3>
-                  <Text weight="semiBold">
-                    {selectedMunicipalityName || "Not assigned"}
-                  </Text>
-                </View>
-                <View style={styles.locationItem}>
-                  <Body3 color={COLORS.text.secondary}>Community</Body3>
-                  <Text weight="semiBold">
-                    {selectedCommunityName || "Not assigned"}
-                  </Text>
-                </View>
-              </View>
-            </View>
+            )}
           </View>
         ) : null}
-        {workflowStep === "saving" && pendingTerritory && (
-          <View
-            style={[
-              styles.saveActionsFixed,
-              {
-                paddingBottom: insets.bottom || responsiveSpacing(SPACING.sm),
-              },
-            ]}
-          >
-            <Button
-              title={isEditMode ? "Edit Boundary" : "Back to Drawing"}
-              onPress={() => {
-                setWorkflowStep("drawing");
-                setDrawingMode(false);
-                setValidationWarnings([]);
-                setValidationErrors([]);
-              }}
-              variant="outline"
-              containerStyle={styles.saveButton}
-            />
-            <Button
-              title={
-                isSavingZone
-                  ? "Saving..."
-                  : isEditMode
-                  ? "Save Changes"
-                  : "Save & Assign"
-              }
-              onPress={handleSaveZone}
-              disabled={
-                territoryName.trim().length === 0 ||
-                isSavingZone ||
-                pendingTerritory === null ||
-                !isLocationSelectionComplete
-              }
-              containerStyle={styles.saveButton}
-            />
-          </View>
-        )}
       </View>
       <Modal
         transparent
@@ -3194,9 +3292,9 @@ const styles = StyleSheet.create({
   },
   bottomSheet: {
     position: "absolute",
-    bottom: 0,
     left: 0,
     right: 0,
+    bottom: 0,
     backgroundColor: COLORS.white,
     borderTopLeftRadius: SPACING.md,
     borderTopRightRadius: SPACING.md,
@@ -3232,12 +3330,26 @@ const styles = StyleSheet.create({
     marginBottom: 0,
     flex: 1,
   },
-  reviewTitle: {
-    paddingTop: responsiveSpacing(SPACING.md),
+  reviewStepCard: {
+    marginTop: 0,
+    minHeight: "100%",
+    flexDirection: "column",
+  },
+  reviewHeader: {
     marginBottom: responsiveSpacing(SPACING.sm),
   },
+  reviewTitle: {
+    marginBottom: responsiveSpacing(SPACING.xs),
+  },
   reviewSubtitle: {
-    marginBottom: responsiveSpacing(SPACING.sm),
+    marginBottom: 0,
+  },
+  reviewScrollView: {
+    flex: 1,
+  },
+  reviewScrollContent: {
+    flexGrow: 1,
+    paddingBottom: responsiveSpacing(SPACING.md),
   },
   section: {
     backgroundColor: COLORS.background.primary,
@@ -3373,7 +3485,11 @@ const styles = StyleSheet.create({
   saveActionsFixed: {
     flexDirection: "row",
     gap: responsiveSpacing(SPACING.sm),
-    paddingTop: responsiveSpacing(SPACING.sm),
+    paddingTop: responsiveSpacing(SPACING.md),
+    backgroundColor: COLORS.white,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: COLORS.border.light,
+    marginTop: responsiveSpacing(SPACING.sm),
   },
   saveButton: {
     flex: 1,

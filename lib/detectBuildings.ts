@@ -1,5 +1,4 @@
 import type { LatLng as MapLatLng } from "react-native-maps";
-import polyline from "@mapbox/polyline";
 import { getGoogleMapsApiKey } from "./googleMaps";
 
 const OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter";
@@ -127,6 +126,11 @@ const fetchBuildingsFromOSM = async (
 ): Promise<Array<{ id: string; latitude: number; longitude: number }>> => {
   const { minLat, maxLat, minLng, maxLng } = boundingBox;
 
+  console.log("🏗️ [OSM] Fetching buildings from OpenStreetMap", {
+    boundingBox: { minLat, maxLat, minLng, maxLng },
+    polygonPoints: polygon.length,
+  });
+
   const query = `
     [out:json];
     (
@@ -138,22 +142,47 @@ const fetchBuildingsFromOSM = async (
   `;
 
   try {
-    const response = await withRetries(
-      () =>
-        fetch(`${OVERPASS_ENDPOINT}?data=${encodeURIComponent(query)}`),
-      { attempts: 3, initialDelayMs: 800 }
+    const url = `${OVERPASS_ENDPOINT}?data=${encodeURIComponent(query)}`;
+    console.log("🌐 [OSM] Calling Overpass API:", OVERPASS_ENDPOINT);
+
+    const response = await withRetries(() => fetch(url), {
+      attempts: 3,
+      initialDelayMs: 800,
+    });
+
+    console.log(
+      "📡 [OSM] Overpass API response status:",
+      response.status,
+      response.statusText
     );
+
     if (!response.ok) {
+      console.warn(
+        "⚠️ [OSM] Overpass API returned non-OK status:",
+        response.status,
+        response.statusText
+      );
       // Return empty array instead of throwing - this is a non-critical failure
       return [];
     }
+
     const data = await response.json();
+    console.log("📊 [OSM] Overpass API response:", {
+      hasElements: Array.isArray(data?.elements),
+      elementCount: data?.elements?.length || 0,
+      remark: data?.remark,
+    });
+
     if (!Array.isArray(data?.elements)) {
+      console.warn("⚠️ [OSM] Response missing elements array");
       return [];
     }
 
-    const candidates: Array<{ id: string; latitude: number; longitude: number }> =
-      [];
+    const candidates: Array<{
+      id: string;
+      latitude: number;
+      longitude: number;
+    }> = [];
 
     data.elements.forEach((element: any) => {
       if (!element) {
@@ -198,10 +227,19 @@ const fetchBuildingsFromOSM = async (
       }
     });
 
+    console.log(
+      "✅ [OSM] Found",
+      candidates.length,
+      "buildings within polygon"
+    );
     return candidates;
   } catch (error) {
     // OSM API failure is non-critical - return empty array and let the function continue
     // with simulated buildings if needed
+    console.error(
+      "❌ [OSM] Failed to fetch buildings from OpenStreetMap:",
+      error
+    );
     return [];
   }
 };
@@ -210,7 +248,15 @@ const reverseGeocode = async (
   latitude: number,
   longitude: number
 ): Promise<{ address: string; buildingNumber?: number; warning?: string }> => {
-  const apiKey = getGoogleMapsApiKey();
+  let apiKey = getGoogleMapsApiKey();
+
+  // Fallback to hardcoded key if not found (for real device compatibility)
+  if (!apiKey) {
+    console.warn(
+      "⚠️ Google Maps API key not found in config, using fallback key"
+    );
+    apiKey = "AIzaSyCe1aICpk2SmN3ArHwp-79FnsOk38k072M";
+  }
 
   if (!apiKey) {
     return {
@@ -227,7 +273,11 @@ const reverseGeocode = async (
       initialDelayMs: 400,
     });
     const data = await response.json();
-    if (data.status === "OK" && Array.isArray(data.results) && data.results[0]) {
+    if (
+      data.status === "OK" &&
+      Array.isArray(data.results) &&
+      data.results[0]
+    ) {
       const formatted = data.results[0].formatted_address;
       const address =
         formatted ||
@@ -235,7 +285,9 @@ const reverseGeocode = async (
       const houseNumberMatch = address.match(/^(\d+)[^\d]?/);
       return {
         address,
-        buildingNumber: houseNumberMatch ? Number(houseNumberMatch[1]) : undefined,
+        buildingNumber: houseNumberMatch
+          ? Number(houseNumberMatch[1])
+          : undefined,
       };
     }
   } catch (error) {
@@ -279,13 +331,27 @@ export const detectBuildingsForPolygon = async (
   let detectedBuildings: DetectedBuilding[] = [];
 
   // 1️⃣ Try to fetch real buildings from OSM (non-blocking - continue even if it fails)
-  let osmBuildings: Array<{ id: string; latitude: number; longitude: number }> = [];
+  let osmBuildings: Array<{ id: string; latitude: number; longitude: number }> =
+    [];
   try {
+    console.log("🔍 [detectBuildings] Starting OSM building detection...");
     osmBuildings = await fetchBuildingsFromOSM(polygon, boundingBox);
+    console.log(
+      "📦 [detectBuildings] OSM returned",
+      osmBuildings.length,
+      "buildings"
+    );
   } catch (error) {
     // OSM failure is non-critical - continue with simulated buildings
     const errorMessage = (error as Error)?.message || String(error);
-    if (!errorMessage.includes("OpenStreetMap") && !errorMessage.includes("Overpass")) {
+    console.error(
+      "❌ [detectBuildings] Error fetching OSM buildings:",
+      errorMessage
+    );
+    if (
+      !errorMessage.includes("OpenStreetMap") &&
+      !errorMessage.includes("Overpass")
+    ) {
       console.warn("[detectBuildings] Unexpected error fetching OSM:", error);
     }
   }
@@ -314,7 +380,10 @@ export const detectBuildingsForPolygon = async (
       }
     } catch (error) {
       // Skip this building if geocoding fails, continue with others
-      console.warn(`[detectBuildings] Failed to geocode building ${i + 1}:`, error);
+      console.warn(
+        `[detectBuildings] Failed to geocode building ${i + 1}:`,
+        error
+      );
     }
   }
 
@@ -322,7 +391,7 @@ export const detectBuildingsForPolygon = async (
   if (detectedBuildings.length < targetCount) {
     const missing = targetCount - detectedBuildings.length;
     let simulatedCount = 0;
-    
+
     for (let i = 0; i < missing; i += 1) {
       const randomPoint = generateRandomPointInPolygon(polygon, boundingBox);
       if (!randomPoint) {
@@ -356,5 +425,3 @@ export const detectBuildingsForPolygon = async (
   // 4️⃣ Always return buildings (real + simulated), never empty
   return { buildings: detectedBuildings, warnings };
 };
-
-

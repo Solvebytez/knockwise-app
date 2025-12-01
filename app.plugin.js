@@ -5,11 +5,12 @@ const { withAndroidManifest } = require("@expo/config-plugins");
  * This ensures the API key is included every time you run prebuild or run:android
  */
 const withGoogleMapsApiKey = (config) => {
-  return withAndroidManifest(config, async (config) => {
+  return withAndroidManifest(config, (config) => {
     const androidManifest = config.modResults;
     const { manifest } = androidManifest;
 
-    // Get API key from app.json config
+    // Get API key from app.json config - try multiple sources
+    console.log("[GoogleMapsPlugin] Starting plugin execution...");
     const apiKey =
       config.android?.config?.googleMaps?.apiKey ||
       config.plugins?.find(
@@ -17,12 +18,17 @@ const withGoogleMapsApiKey = (config) => {
           Array.isArray(plugin) &&
           plugin[0] === "react-native-maps" &&
           plugin[1]?.googleMapsApiKey
-      )?.[1]?.googleMapsApiKey;
+      )?.[1]?.googleMapsApiKey ||
+      "AIzaSyCe1aICpk2SmN3ArHwp-79FnsOk38k072M"; // Fallback to hardcoded key
+
+    console.log(
+      `[GoogleMapsPlugin] API Key found: ${
+        apiKey ? "Yes (" + apiKey.substring(0, 10) + "...)" : "No"
+      }`
+    );
 
     if (!apiKey) {
-      console.warn(
-        "⚠️ Google Maps API key not found in app.json config"
-      );
+      console.warn("⚠️ Google Maps API key not found in app.json config");
       return config;
     }
 
@@ -38,47 +44,47 @@ const withGoogleMapsApiKey = (config) => {
       application["meta-data"] = [];
     }
 
-    // Check if API key meta-data already exists
-    const existingApiKeyIndex = application["meta-data"].findIndex(
-      (meta) =>
-        meta.$?.["android:name"] === "com.google.android.geo.API_KEY"
-    );
+    const metaNames = [
+      "com.google.android.geo.API_KEY",
+      "com.google.android.maps.v2.API_KEY",
+    ];
 
-    const apiKeyMetaData = {
-      $: {
-        "android:name": "com.google.android.geo.API_KEY",
-        "android:value": apiKey,
-      },
-    };
-
-    if (existingApiKeyIndex >= 0) {
-      // Update existing meta-data
-      application["meta-data"][existingApiKeyIndex] = apiKeyMetaData;
-      console.log("✅ Updated Google Maps API key in AndroidManifest.xml");
-    } else {
-      // Add new meta-data
-      application["meta-data"].push(apiKeyMetaData);
-      console.log("✅ Added Google Maps API key to AndroidManifest.xml");
+    // Remove any existing API key entries for both names
+    const beforeCount = application["meta-data"].length;
+    application["meta-data"] = application["meta-data"].filter((meta) => {
+      const name = meta.$?.["android:name"];
+      return !metaNames.includes(name);
+    });
+    const removed = beforeCount - application["meta-data"].length;
+    if (removed > 0) {
+      console.log(
+        `[GoogleMapsPlugin] Removed ${removed} existing Google Maps meta-data entries`
+      );
     }
+
+    metaNames.forEach((name) => {
+      const apiKeyMetaData = {
+        $: {
+          "android:name": name,
+          "android:value": apiKey,
+        },
+      };
+      application["meta-data"].push(apiKeyMetaData);
+      console.log(
+        `✅ [GoogleMapsPlugin] Injected ${name} with key ${apiKey.substring(
+          0,
+          10
+        )}...`
+      );
+    });
+
+    console.log(
+      `[GoogleMapsPlugin] Total meta-data entries: ${application["meta-data"].length}`
+    );
+    console.log(`[GoogleMapsPlugin] Plugin execution completed successfully.`);
 
     return config;
   });
 };
 
 module.exports = withGoogleMapsApiKey;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

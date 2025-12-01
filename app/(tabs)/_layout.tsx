@@ -55,6 +55,13 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="manual-zone"
+        options={{
+          title: 'Manual Zone',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="pencil.fill" color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="my-routes"
         options={{
           title: 'My Routes',

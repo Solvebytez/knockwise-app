@@ -438,7 +438,14 @@ export default function MyRoutesScreen(): React.JSX.Element {
       return;
     }
 
-    const apiKey = getGoogleMapsApiKey();
+    let apiKey = getGoogleMapsApiKey();
+    
+    // Fallback to hardcoded key if not found (for real device compatibility)
+    if (!apiKey) {
+      console.warn("⚠️ Google Maps API key not found in config, using fallback key");
+      apiKey = "AIzaSyCe1aICpk2SmN3ArHwp-79FnsOk38k072M";
+    }
+
     if (!apiKey) {
       Alert.alert(
         "Missing API key",
@@ -2228,9 +2235,9 @@ export default function MyRoutesScreen(): React.JSX.Element {
                             </Body3>
                           </View>
                           <Body3 style={styles.previewLocationAddressStart}>
-                            {selectedPreviewDetails.legs[0]?.startAddress}
-                          </Body3>
-                        </View>
+                          {selectedPreviewDetails.legs[0]?.startAddress}
+                        </Body3>
+                      </View>
                       </LinearGradient>
                       <LinearGradient
                         colors={["#f59e0b", "#d97706"]}
@@ -2252,16 +2259,16 @@ export default function MyRoutesScreen(): React.JSX.Element {
                               ]}
                             >
                               {String.fromCharCode(65 + selectedPreviewDetails.legs.length)}
-                            </Body3>
+                        </Body3>
                           </View>
                           <Body3 style={styles.previewLocationAddressDestination}>
-                            {
-                              selectedPreviewDetails.legs[
-                                selectedPreviewDetails.legs.length - 1
-                              ]?.endAddress
-                            }
-                          </Body3>
-                        </View>
+                          {
+                            selectedPreviewDetails.legs[
+                              selectedPreviewDetails.legs.length - 1
+                            ]?.endAddress
+                          }
+                        </Body3>
+                      </View>
                       </LinearGradient>
                     </View>
                   )}
@@ -2331,7 +2338,7 @@ export default function MyRoutesScreen(): React.JSX.Element {
                                   style={styles.previewLetterBadgeText}
                                 >
                                   {startLetter}
-                                </Body3>
+                              </Body3>
                               </View>
                               <Body3
                                 style={styles.previewLegLocationText}
@@ -2353,7 +2360,7 @@ export default function MyRoutesScreen(): React.JSX.Element {
                                   style={styles.previewLetterBadgeText}
                                 >
                                   {endLetter}
-                                </Body3>
+                              </Body3>
                               </View>
                               <Body3
                                 style={styles.previewLegLocationText}
@@ -2482,10 +2489,10 @@ export default function MyRoutesScreen(): React.JSX.Element {
                             styles.mapMarkerBadge,
                             {
                               backgroundColor:
-                                marker.type === "start"
-                                  ? COLORS.success[600]
-                                  : marker.type === "end"
-                                  ? COLORS.error[500]
+                          marker.type === "start"
+                            ? COLORS.success[600]
+                            : marker.type === "end"
+                            ? COLORS.error[500]
                                   : getLetterColor(marker.letter),
                             },
                           ]}
@@ -2636,12 +2643,12 @@ export default function MyRoutesScreen(): React.JSX.Element {
                                     ]}
                                   >
                                     A
-                                  </Body3>
+                              </Body3>
                                 </View>
                                 <Body3 style={styles.previewLocationAddressStart}>
-                                  {selectedAlt.legs[0]?.startAddress}
-                                </Body3>
-                              </View>
+                                {selectedAlt.legs[0]?.startAddress}
+                              </Body3>
+                            </View>
                             </LinearGradient>
                             <LinearGradient
                               colors={["#f59e0b", "#d97706"]}
@@ -2663,17 +2670,17 @@ export default function MyRoutesScreen(): React.JSX.Element {
                                     ]}
                                   >
                                     {String.fromCharCode(65 + selectedAlt.legs.length)}
-                                  </Body3>
+                              </Body3>
                                 </View>
                                 <Body3
                                   style={styles.previewLocationAddressDestination}
                                 >
-                                  {
-                                    selectedAlt.legs[selectedAlt.legs.length - 1]
-                                      ?.endAddress
-                                  }
-                                </Body3>
-                              </View>
+                                {
+                                  selectedAlt.legs[selectedAlt.legs.length - 1]
+                                    ?.endAddress
+                                }
+                              </Body3>
+                            </View>
                             </LinearGradient>
                           </View>
                         )}
@@ -2703,12 +2710,12 @@ export default function MyRoutesScreen(): React.JSX.Element {
                                         { backgroundColor: getLetterColor(startLetter) },
                                       ]}
                                     >
-                                      <Body3
+                                    <Body3
                                         weight="bold"
                                         style={styles.previewLetterBadgeText}
-                                      >
+                                    >
                                         {startLetter}
-                                      </Body3>
+                                    </Body3>
                                     </View>
                                     <Body3
                                       style={styles.previewLegLocationText}
@@ -2727,12 +2734,12 @@ export default function MyRoutesScreen(): React.JSX.Element {
                                         { backgroundColor: getLetterColor(endLetter) },
                                       ]}
                                     >
-                                      <Body3
+                                    <Body3
                                         weight="bold"
                                         style={styles.previewLetterBadgeText}
-                                      >
+                                    >
                                         {endLetter}
-                                      </Body3>
+                                    </Body3>
                                     </View>
                                     <Body3
                                       style={styles.previewLegLocationText}
@@ -2981,7 +2988,7 @@ export default function MyRoutesScreen(): React.JSX.Element {
                               {
                                 backgroundColor:
                                   legIndex === totalLegs - 1
-                                    ? COLORS.error[500]
+                              ? COLORS.error[500]
                                     : getLetterColor(endLetter),
                               },
                             ]}

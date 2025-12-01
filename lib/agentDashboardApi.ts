@@ -11,8 +11,12 @@ export interface AgentDashboardStats {
   territories: number;
   routes: number;
   totalVisitsToday: number;
+  totalVisitsYesterday: number;
   leadsCreatedToday: number;
+  completedVisitsToday: number;
+  pendingVisitsToday: number;
   totalPropertiesInCreatedZones: number;
+  totalZonesCreatedByUser: number;
 }
 
 export interface AgentDashboardResponse {

@@ -54,23 +54,85 @@ import { getGoogleMapsApiKey } from "@/lib/googleMaps";
 
 // Geocode an address using Google Geocoding API to avoid OS location permission
 const geocodeAddressWithPlaces = async (address: string) => {
-  const apiKey = getGoogleMapsApiKey();
-  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
-    address
-  )}&key=${apiKey}`;
-  const response = await fetch(url);
-  const data = await response.json();
-  if (data.status !== "OK" || !data.results || data.results.length === 0) {
-    throw new Error(`Geocoding failed with status: ${data.status}`);
+  try {
+    let apiKey = getGoogleMapsApiKey();
+
+    // Fallback to hardcoded key if not found (for real device compatibility)
+    if (!apiKey) {
+      console.warn(
+        "⚠️ Google Maps API key not found in config, using fallback key"
+      );
+      apiKey = "AIzaSyCe1aICpk2SmN3ArHwp-79FnsOk38k072M";
+    }
+
+    if (!apiKey) {
+      throw new Error("Google Maps API key not configured");
+    }
+
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
+      address
+    )}&key=${apiKey}`;
+
+    console.log("🔍 Geocoding address:", address.substring(0, 50) + "...");
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      console.error(
+        "❌ Geocoding API response not OK:",
+        response.status,
+        response.statusText
+      );
+      throw new Error(
+        `Geocoding API request failed: ${response.status} ${response.statusText}`
+      );
+    }
+
+    const data = await response.json();
+
+    console.log("📊 Geocoding API response status:", data.status);
+
+    if (data.status === "ZERO_RESULTS") {
+      console.warn("⚠️ No results found for address:", address);
+      throw new Error("No location data found for this address");
+    }
+
+    if (data.status === "REQUEST_DENIED") {
+      console.error(
+        "❌ Geocoding API request denied:",
+        data.error_message || "Unknown error"
+      );
+      throw new Error(
+        `Geocoding API request denied: ${
+          data.error_message || "Check API key configuration"
+        }`
+      );
+    }
+
+    if (data.status !== "OK" || !data.results || data.results.length === 0) {
+      console.error("❌ Geocoding API error:", data.status, data.error_message);
+      throw new Error(
+        `Geocoding failed with status: ${data.status}${
+          data.error_message ? ` - ${data.error_message}` : ""
+        }`
+      );
+    }
+
+    const result = data.results[0];
+    const { lat, lng } = result.geometry.location;
+    const formattedAddress: string = result.formatted_address;
+    const streetNumber =
+      result.address_components?.find((c: any) =>
+        (c.types || []).includes("street_number")
+      )?.long_name || "";
+
+    console.log("✅ Geocoding successful:", lat, lng);
+
+    return { lat, lng, formattedAddress, streetNumber };
+  } catch (error: any) {
+    console.error("❌ Geocoding error:", error);
+    throw error;
   }
-  const result = data.results[0];
-  const { lat, lng } = result.geometry.location;
-  const formattedAddress: string = result.formatted_address;
-  const streetNumber =
-    result.address_components?.find((c: any) =>
-      (c.types || []).includes("street_number")
-    )?.long_name || "";
-  return { lat, lng, formattedAddress, streetNumber };
 };
 
 interface Territory {
@@ -889,23 +951,73 @@ export default function TerritoryMapViewScreen() {
 
     try {
       setIsLoadingSuggestions(true);
-      const apiKey = "AIzaSyCe1aICpk2SmN3ArHwp-79FnsOk38k072M";
+
+      let apiKey = getGoogleMapsApiKey();
+
+      // Fallback to hardcoded key if not found (for real device compatibility)
+      if (!apiKey) {
+        console.warn(
+          "⚠️ Google Maps API key not found in config, using fallback key"
+        );
+        apiKey = "AIzaSyCe1aICpk2SmN3ArHwp-79FnsOk38k072M";
+      }
+
+      if (!apiKey) {
+        throw new Error("Google Maps API key not configured");
+      }
+
       const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
         query
       )}&key=${apiKey}&types=address&components=country:ca`;
 
+      console.log(
+        "🔍 Fetching address suggestions for:",
+        query.substring(0, 50) + "..."
+      );
+
       const response = await fetch(url);
+
+      if (!response.ok) {
+        console.error(
+          "❌ Address suggestions API response not OK:",
+          response.status,
+          response.statusText
+        );
+        throw new Error(
+          `Address suggestions API request failed: ${response.status} ${response.statusText}`
+        );
+      }
+
       const data = await response.json();
 
+      console.log("📊 Address suggestions API response status:", data.status);
+
       if (data.status === "OK" && data.predictions) {
+        console.log("✅ Found", data.predictions.length, "address suggestions");
         setAddressSuggestions(data.predictions);
         setShowAddressSuggestions(true);
+      } else if (data.status === "ZERO_RESULTS") {
+        console.log("ℹ️ No address suggestions found");
+        setAddressSuggestions([]);
+        setShowAddressSuggestions(false);
+      } else if (data.status === "REQUEST_DENIED") {
+        console.error(
+          "❌ Address suggestions API request denied:",
+          data.error_message || "Unknown error"
+        );
+        setAddressSuggestions([]);
+        setShowAddressSuggestions(false);
       } else {
+        console.warn(
+          "⚠️ Address suggestions API returned status:",
+          data.status,
+          data.error_message
+        );
         setAddressSuggestions([]);
         setShowAddressSuggestions(false);
       }
-    } catch (error) {
-      console.error("Error fetching address suggestions:", error);
+    } catch (error: any) {
+      console.error("❌ Error fetching address suggestions:", error);
       setAddressSuggestions([]);
       setShowAddressSuggestions(false);
     } finally {
@@ -975,8 +1087,13 @@ export default function TerritoryMapViewScreen() {
       }));
 
       console.log("✅ Exact coordinates found:", lat, lng);
-    } catch (error) {
+    } catch (error: any) {
       console.error("❌ Error finding exact coordinates:", error);
+      Alert.alert(
+        "Error",
+        error.message ||
+          "Failed to find coordinates. Please check the address and try again."
+      );
     } finally {
       setIsEditValidating(false);
     }
@@ -1025,12 +1142,12 @@ export default function TerritoryMapViewScreen() {
         "Success",
         `Coordinates found: ${lat.toFixed(6)}, ${lng.toFixed(6)}`
       );
-    } catch (error) {
+    } catch (error: any) {
       console.error("❌ Error finding exact coordinates:", error);
-      Alert.alert(
-        "Error",
-        "Failed to find coordinates. Please check the address and try again."
-      );
+      const errorMessage =
+        error.message ||
+        "Failed to find coordinates. Please check the address and try again.";
+      Alert.alert("Error", errorMessage);
     } finally {
       setIsEditValidating(false);
     }
@@ -1091,6 +1208,9 @@ export default function TerritoryMapViewScreen() {
 
         // Invalidate dashboard query cache to refresh statistics (matching web)
         queryClient.invalidateQueries({ queryKey: ["myTerritories"] });
+
+        // Invalidate agent dashboard stats to refresh home screen cards
+        queryClient.invalidateQueries({ queryKey: ["agentDashboardStats"] });
 
         // Also invalidate admin dashboard queries (matching web)
         queryClient.invalidateQueries({

@@ -194,24 +194,55 @@ const AddPropertyModal = React.forwardRef<
 
     try {
       setIsLoadingAddSuggestions(true);
-      const apiKey = "AIzaSyCe1aICpk2SmN3ArHwp-79FnsOk38k072M";
-      const response = await fetch(
-        `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
-          query
-        )}&key=${apiKey}&types=address&components=country:ca`
-      );
+      
+      let apiKey = getGoogleMapsApiKey();
+      
+      // Fallback to hardcoded key if not found (for real device compatibility)
+      if (!apiKey) {
+        console.warn("⚠️ Google Maps API key not found in config, using fallback key");
+        apiKey = "AIzaSyCe1aICpk2SmN3ArHwp-79FnsOk38k072M";
+      }
 
+      if (!apiKey) {
+        throw new Error("Google Maps API key not configured");
+      }
+
+      const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
+        query
+      )}&key=${apiKey}&types=address&components=country:ca`;
+
+      console.log("🔍 Fetching address suggestions for:", query.substring(0, 50) + "...");
+      
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        console.error("❌ Address suggestions API response not OK:", response.status, response.statusText);
+        throw new Error(`Address suggestions API request failed: ${response.status} ${response.statusText}`);
+      }
+      
       const data = await response.json();
+      
+      console.log("📊 Address suggestions API response status:", data.status);
 
       if (data.status === "OK" && data.predictions) {
+        console.log("✅ Found", data.predictions.length, "address suggestions");
         setAddAddressSuggestions(data.predictions);
         setShowAddAddressSuggestions(true);
+      } else if (data.status === "ZERO_RESULTS") {
+        console.log("ℹ️ No address suggestions found");
+        setAddAddressSuggestions([]);
+        setShowAddAddressSuggestions(false);
+      } else if (data.status === "REQUEST_DENIED") {
+        console.error("❌ Address suggestions API request denied:", data.error_message || "Unknown error");
+        setAddAddressSuggestions([]);
+        setShowAddAddressSuggestions(false);
       } else {
+        console.warn("⚠️ Address suggestions API returned status:", data.status, data.error_message);
         setAddAddressSuggestions([]);
         setShowAddAddressSuggestions(false);
       }
-    } catch (error) {
-      console.error("Error fetching address suggestions:", error);
+    } catch (error: any) {
+      console.error("❌ Error fetching address suggestions:", error);
       setAddAddressSuggestions([]);
       setShowAddAddressSuggestions(false);
     } finally {
@@ -232,42 +263,80 @@ const AddPropertyModal = React.forwardRef<
 
   // Helper function to geocode address using Google Geocoding API (bypasses location permission)
   const geocodeAddressWithPlaces = async (address: string) => {
-    const apiKey = getGoogleMapsApiKey();
-    if (!apiKey) {
-      throw new Error("Google Maps API key not configured");
+    try {
+      let apiKey = getGoogleMapsApiKey();
+      
+      // Fallback to hardcoded key if not found (for real device compatibility)
+      if (!apiKey) {
+        console.warn("⚠️ Google Maps API key not found in config, using fallback key");
+        apiKey = "AIzaSyCe1aICpk2SmN3ArHwp-79FnsOk38k072M";
+      }
+
+      if (!apiKey) {
+        throw new Error("Google Maps API key not configured");
+      }
+
+      const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`;
+      
+      console.log("🔍 Geocoding address:", address.substring(0, 50) + "...");
+      
+      const response = await fetch(geocodeUrl);
+      
+      if (!response.ok) {
+        console.error("❌ Geocoding API response not OK:", response.status, response.statusText);
+        throw new Error(`Geocoding API request failed: ${response.status} ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      console.log("📊 Geocoding API response status:", data.status);
+
+      if (data.status === "ZERO_RESULTS") {
+        console.warn("⚠️ No results found for address:", address);
+        return null;
+      }
+
+      if (data.status === "REQUEST_DENIED") {
+        console.error("❌ Geocoding API request denied:", data.error_message || "Unknown error");
+        throw new Error(`Geocoding API request denied: ${data.error_message || "Check API key configuration"}`);
+      }
+
+      if (data.status !== "OK" || !data.results || data.results.length === 0) {
+        console.error("❌ Geocoding API error:", data.status, data.error_message);
+        return null;
+      }
+
+      const result = data.results[0];
+      const location = result.geometry.location;
+      const addressComponents = result.address_components || [];
+
+      // Extract address components
+      const getComponent = (type: string) => {
+        const component = addressComponents.find((comp: any) =>
+          comp.types.includes(type)
+        );
+        return component?.long_name || "";
+      };
+
+      const geocodeResult = {
+        latitude: location.lat,
+        longitude: location.lng,
+        formattedAddress: result.formatted_address,
+        streetNumber: getComponent("street_number"),
+        street: getComponent("route"),
+        city: getComponent("locality") || getComponent("administrative_area_level_2"),
+        region: getComponent("administrative_area_level_1"),
+        postalCode: getComponent("postal_code"),
+        country: getComponent("country"),
+      };
+
+      console.log("✅ Geocoding successful:", geocodeResult.latitude, geocodeResult.longitude);
+      
+      return geocodeResult;
+    } catch (error: any) {
+      console.error("❌ Geocoding error:", error);
+      throw error;
     }
-
-    const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`;
-    const response = await fetch(geocodeUrl);
-    const data = await response.json();
-
-    if (data.status !== "OK" || !data.results || data.results.length === 0) {
-      return null;
-    }
-
-    const result = data.results[0];
-    const location = result.geometry.location;
-    const addressComponents = result.address_components || [];
-
-    // Extract address components
-    const getComponent = (type: string) => {
-      const component = addressComponents.find((comp: any) =>
-        comp.types.includes(type)
-      );
-      return component?.long_name || "";
-    };
-
-    return {
-      latitude: location.lat,
-      longitude: location.lng,
-      formattedAddress: result.formatted_address,
-      streetNumber: getComponent("street_number"),
-      street: getComponent("route"),
-      city: getComponent("locality") || getComponent("administrative_area_level_2"),
-      region: getComponent("administrative_area_level_1"),
-      postalCode: getComponent("postal_code"),
-      country: getComponent("country"),
-    };
   };
 
   // Handle address search for selected suggestion
@@ -309,9 +378,18 @@ const AddPropertyModal = React.forwardRef<
           address: finalFormattedAddress || prev.address,
           houseNumber: houseNumber || prev.houseNumber,
         }));
+      } else {
+        Alert.alert(
+          "Location Not Found",
+          "Could not find coordinates for this address. Please try a different address or enter coordinates manually."
+        );
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("❌ Error finding exact coordinates:", error);
+      Alert.alert(
+        "Error",
+        error.message || "Failed to find coordinates. Please check the address and try again."
+      );
     } finally {
       setIsAddValidating(false);
     }
@@ -363,14 +441,15 @@ const AddPropertyModal = React.forwardRef<
           `Coordinates found: ${lat.toFixed(6)}, ${lng.toFixed(6)}`
         );
       } else {
-        Alert.alert("Error", "No location data found for this address");
+        Alert.alert(
+          "Location Not Found",
+          "No location data found for this address. Please try a different address or enter coordinates manually."
+        );
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("❌ Error finding exact coordinates:", error);
-      Alert.alert(
-        "Error",
-        "Failed to find coordinates. Please check the address and try again."
-      );
+      const errorMessage = error.message || "Failed to find coordinates. Please check the address and try again.";
+      Alert.alert("Error", errorMessage);
     } finally {
       setIsAddValidating(false);
     }
@@ -497,6 +576,10 @@ const AddPropertyModal = React.forwardRef<
 
         // Invalidate cache
         queryClient.invalidateQueries({ queryKey: ["myTerritories"] });
+        
+        // Invalidate agent dashboard stats to refresh home screen cards
+        queryClient.invalidateQueries({ queryKey: ["agentDashboardStats"] });
+        
         queryClient.invalidateQueries({
           queryKey: ["admin", "team-performance"],
         });

@@ -7,9 +7,10 @@ import {
   ActivityIndicator,
   TextInput,
   StatusBar,
+  RefreshControl,
 } from "react-native";
 import { useRouter } from "expo-router";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
 import { apiInstance } from "@/lib/apiInstance";
 import {
@@ -24,7 +25,7 @@ import { Button } from "@/components/ui";
 import { AppHeader } from "@/components/ui";
 import { Ionicons } from "@expo/vector-icons";
 
-interface AgentTerritory {
+interface ManualZone {
   _id: string;
   name: string;
   description: string;
@@ -36,6 +37,7 @@ interface AgentTerritory {
   teamName?: string;
   teamId?: string;
   scheduledDate?: string;
+  zoneType?: "MANUAL" | "MAP";
   statistics: {
     totalHouses: number;
     visitedCount: number;
@@ -63,7 +65,7 @@ interface AgentTerritory {
   updatedAt: string;
 }
 
-function MyTerritoryScreen() {
+function ManualZoneScreen() {
   const { user } = useAuthStore();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -74,99 +76,136 @@ function MyTerritoryScreen() {
     data: territoriesData,
     isLoading,
     error,
+    refetch,
+    isRefetching,
   } = useQuery({
     queryKey: ["myTerritories"],
     queryFn: async () => {
+      console.log("📱 [ManualZoneTab] Fetching territories...");
       const response = await apiInstance.get("/users/my-territories");
+      console.log(
+        "📱 [ManualZoneTab] Raw API response:",
+        JSON.stringify(response.data, null, 2)
+      );
       return response.data;
     },
     refetchOnWindowFocus: false,
   });
 
-  // Ensure territories is always an array and sort by latest first
-  // Priority: Most recently updated/created territories first (regardless of primary status)
-  const territories: AgentTerritory[] = Array.isArray(
-    territoriesData?.data?.territories
-  )
-    ? [...territoriesData.data.territories].sort((a, b) => {
-        // Primary sort: Use updatedAt if available, otherwise fall back to createdAt
-        // This ensures recently updated or created territories appear first
-        const updatedA = a.updatedAt ? new Date(a.updatedAt).getTime() : null;
-        const updatedB = b.updatedAt ? new Date(b.updatedAt).getTime() : null;
-        const createdA = a.createdAt ? new Date(a.createdAt).getTime() : null;
-        const createdB = b.createdAt ? new Date(b.createdAt).getTime() : null;
-        
-        // Get the most recent date for each territory (updatedAt takes priority over createdAt)
-        const timeA = updatedA || createdA;
-        const timeB = updatedB || createdB;
-        
-        // Handle missing dates - put them at the end
-        if (!timeA && !timeB) {
-          // If both have no dates, use createdAt as secondary sort
-          if (createdA && createdB) {
-            return createdB - createdA;
-          }
-          return 0;
-        }
-        if (!timeA) return 1; // Put items without date at the end
-        if (!timeB) return -1;
-        
-        // Handle invalid dates
-        if (isNaN(timeA) || isNaN(timeB)) return 0;
-        
-        // Primary sort: Most recent updated/created first (descending order)
-        const dateDiff = timeB - timeA;
-        if (dateDiff !== 0) return dateDiff;
-        
-        // Secondary sort: If dates are equal, use createdAt as tiebreaker
+  const handleRefresh = async () => {
+    console.log("📱 [ManualZoneTab] Refreshing...");
+    await refetch();
+  };
+
+  // Filter to only manual zones and sort by latest first
+  const allTerritories = Array.isArray(territoriesData?.data?.territories)
+    ? territoriesData.data.territories
+    : [];
+
+  console.log(
+    "📱 [ManualZoneTab] Total territories received:",
+    allTerritories.length
+  );
+  console.log(
+    "📱 [ManualZoneTab] Territories with zoneType:",
+    allTerritories.map((z: any) => ({
+      name: z.name,
+      zoneType: z.zoneType,
+      _id: z._id,
+    }))
+  );
+
+  const manualZones: ManualZone[] = allTerritories
+    .filter((zone: any) => {
+      const isManual = zone.zoneType === "MANUAL";
+      if (!isManual) {
+        console.log(
+          `📱 [ManualZoneTab] Filtered out zone "${zone.name}" - zoneType: ${zone.zoneType}`
+        );
+      }
+      return isManual;
+    })
+    .sort((a: ManualZone, b: ManualZone) => {
+      const updatedA = a.updatedAt ? new Date(a.updatedAt).getTime() : null;
+      const updatedB = b.updatedAt ? new Date(b.updatedAt).getTime() : null;
+      const createdA = a.createdAt ? new Date(a.createdAt).getTime() : null;
+      const createdB = b.createdAt ? new Date(b.createdAt).getTime() : null;
+
+      const timeA = updatedA || createdA;
+      const timeB = updatedB || createdB;
+
+      if (!timeA && !timeB) {
         if (createdA && createdB) {
           return createdB - createdA;
         }
-        
         return 0;
-      })
-    : [];
+      }
+      if (!timeA) return 1;
+      if (!timeB) return -1;
+      if (isNaN(timeA) || isNaN(timeB)) return 0;
 
-  const summary = territoriesData?.data?.summary || {
-    totalTerritories: territories.length,
-    activeTerritories: territories.filter((t) => t.status === "ACTIVE").length,
-    scheduledTerritories: territories.filter((t) => t.isScheduled).length,
-    totalHouses: territories.reduce(
-      (sum, t) => sum + (t.statistics?.totalHouses || 0),
+      const dateDiff = timeB - timeA;
+      if (dateDiff !== 0) return dateDiff;
+
+      if (createdA && createdB) {
+        return createdB - createdA;
+      }
+
+      return 0;
+    });
+
+  console.log(
+    "📱 [ManualZoneTab] Filtered manual zones count:",
+    manualZones.length
+  );
+  console.log(
+    "📱 [ManualZoneTab] Manual zones:",
+    manualZones.map((z) => ({
+      name: z.name,
+      zoneType: z.zoneType,
+      _id: z._id,
+    }))
+  );
+
+  const summary = {
+    totalZones: manualZones.length,
+    activeZones: manualZones.filter((z) => z.status === "ACTIVE").length,
+    scheduledZones: manualZones.filter((z) => z.isScheduled).length,
+    totalHouses: manualZones.reduce(
+      (sum, z) => sum + (z.statistics?.totalHouses || 0),
       0
     ),
-    visitedHouses: territories.reduce(
-      (sum, t) => sum + (t.statistics?.visitedCount || 0),
+    visitedHouses: manualZones.reduce(
+      (sum, z) => sum + (z.statistics?.visitedCount || 0),
       0
     ),
-    notVisitedHouses: territories.reduce(
-      (sum, t) => sum + (t.statistics?.notVisitedCount || 0),
+    notVisitedHouses: manualZones.reduce(
+      (sum, z) => sum + (z.statistics?.notVisitedCount || 0),
       0
     ),
     completionPercentage:
-      territories.length > 0
-      ? Math.round(
-            territories.reduce(
-              (sum, t) => sum + (t.statistics?.completionPercentage || 0),
+      manualZones.length > 0
+        ? Math.round(
+            manualZones.reduce(
+              (sum, z) => sum + (z.statistics?.completionPercentage || 0),
               0
-            ) / territories.length
-        )
-      : 0,
+            ) / manualZones.length
+          )
+        : 0,
   };
 
   // Helper function to check if current agent is the creator
-  // Handles both id and _id fields (backend might return either)
-  const isTerritoryCreatedByAgent = (territory: AgentTerritory): boolean => {
+  const isZoneCreatedByAgent = (zone: ManualZone): boolean => {
     if (!user) return false;
     const userId = user.id || (user as any)._id;
-    return territory.createdBy === userId;
+    return zone.createdBy === userId;
   };
 
-  // Filter territories (already sorted by latest first)
-  const filteredTerritories = territories.filter(
-    (territory) =>
-      territory.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      territory.description?.toLowerCase().includes(searchTerm.toLowerCase())
+  // Filter zones (already sorted by latest first)
+  const filteredZones = manualZones.filter(
+    (zone) =>
+      zone.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      zone.description?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   if (isLoading) {
@@ -174,7 +213,7 @@ function MyTerritoryScreen() {
       <View style={styles.container}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={COLORS.primary[500]} />
-          <Text style={styles.loadingText}>Loading territories...</Text>
+          <Text style={styles.loadingText}>Loading manual zones...</Text>
         </View>
       </View>
     );
@@ -184,7 +223,7 @@ function MyTerritoryScreen() {
     return (
       <View style={styles.container}>
         <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>Failed to load territories</Text>
+          <Text style={styles.errorText}>Failed to load manual zones</Text>
           <Button
             variant="outline"
             size="medium"
@@ -205,8 +244,8 @@ function MyTerritoryScreen() {
         backgroundColor={COLORS.primary[500]}
       />
       <AppHeader
-        title="My Territory"
-        subtext={`Manage your assigned territories (${territories.length} total)`}
+        title="Manual Zone"
+        subtext={`Manage your manual zones (${manualZones.length} total)`}
         showBackButton={false}
         backgroundColor={COLORS.primary[500]}
         textColor={COLORS.white}
@@ -216,19 +255,27 @@ function MyTerritoryScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefetching}
+            onRefresh={handleRefresh}
+            tintColor={COLORS.primary[500]}
+            colors={[COLORS.primary[500]]}
+          />
+        }
       >
         {/* Stats Cards */}
         <View style={styles.statsContainer}>
           <View style={[styles.statCard, styles.statCard1]}>
             <View style={styles.statCardHeader}>
-              <Text style={styles.statLabel}>Assigned</Text>
-              <Text style={styles.statIcon}>📍</Text>
+              <Text style={styles.statLabel}>Manual Zones</Text>
+              <Text style={styles.statIcon}>📝</Text>
             </View>
-            <Text style={styles.statValue}>{summary.totalTerritories}</Text>
+            <Text style={styles.statValue}>{summary.totalZones}</Text>
             <Body2 color={COLORS.text.secondary} style={styles.statSubtext}>
-              {summary.activeTerritories} active
-              {summary.scheduledTerritories > 0 &&
-                `, ${summary.scheduledTerritories} scheduled`}
+              {summary.activeZones} active
+              {summary.scheduledZones > 0 &&
+                `, ${summary.scheduledZones} scheduled`}
             </Body2>
           </View>
 
@@ -239,7 +286,7 @@ function MyTerritoryScreen() {
             </View>
             <Text style={styles.statValue}>{summary.totalHouses}</Text>
             <Body2 color={COLORS.text.secondary} style={styles.statSubtext}>
-              Across all territories
+              Across all zones
             </Body2>
           </View>
 
@@ -264,7 +311,7 @@ function MyTerritoryScreen() {
             <Text style={styles.searchIcon}>🔍</Text>
             <TextInput
               style={styles.searchInput}
-              placeholder="Search territories..."
+              placeholder="Search manual zones..."
               placeholderTextColor={COLORS.text.light}
               value={searchTerm}
               onChangeText={setSearchTerm}
@@ -272,13 +319,13 @@ function MyTerritoryScreen() {
           </View>
         </View>
 
-        {/* Create Zone Button */}
+        {/* Create Manual Zone Button */}
         <View style={styles.createZoneContainer}>
           <Button
             variant="primary"
             size="medium"
-            title="Create Zone"
-            onPress={() => router.push("/create-zone")}
+            title="Create Manual Zone"
+            onPress={() => router.push("/manual-zone-form")}
             containerStyle={styles.createZoneButton}
             leftIcon={
               <Ionicons
@@ -290,28 +337,28 @@ function MyTerritoryScreen() {
           />
         </View>
 
-        {/* Territories List */}
-        {filteredTerritories.length === 0 ? (
+        {/* Zones List */}
+        {filteredZones.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyIcon}>📍</Text>
+            <Text style={styles.emptyIcon}>📝</Text>
             <H3 style={styles.emptyTitle}>
               {searchTerm
-                ? "No territories found"
-                : "No territories assigned yet"}
+                ? "No manual zones found"
+                : "No manual zones created yet"}
             </H3>
             <Body2 color={COLORS.text.secondary} style={styles.emptyText}>
               {searchTerm
                 ? "Try adjusting your search terms"
-                : "You'll see your assigned territories here"}
+                : "Create your first manual zone to get started"}
             </Body2>
           </View>
         ) : (
-          <View style={styles.territoriesList}>
-            {filteredTerritories.map((territory) => (
-              <TerritoryCard
-                key={territory._id}
-                territory={territory}
-                isCreatedByAgent={isTerritoryCreatedByAgent(territory)}
+          <View style={styles.zonesList}>
+            {filteredZones.map((zone) => (
+              <ManualZoneCard
+                key={zone._id}
+                zone={zone}
+                isCreatedByAgent={isZoneCreatedByAgent(zone)}
               />
             ))}
           </View>
@@ -321,12 +368,12 @@ function MyTerritoryScreen() {
   );
 }
 
-interface TerritoryCardProps {
-  territory: AgentTerritory;
+interface ManualZoneCardProps {
+  zone: ManualZone;
   isCreatedByAgent: boolean;
 }
 
-function TerritoryCard({ territory, isCreatedByAgent }: TerritoryCardProps) {
+function ManualZoneCard({ zone, isCreatedByAgent }: ManualZoneCardProps) {
   const router = useRouter();
 
   const formatDate = (dateString: string) => {
@@ -340,56 +387,52 @@ function TerritoryCard({ territory, isCreatedByAgent }: TerritoryCardProps) {
   const handleMapView = () => {
     router.push({
       pathname: "/territory-map-view/[territory_id]",
-      params: { territory_id: territory._id },
+      params: { territory_id: zone._id },
     });
   };
 
   const formatLocationHierarchy = () => {
     const parts = [];
-    if (territory.areaId?.name) parts.push(territory.areaId.name);
-    if (territory.municipalityId?.name)
-      parts.push(territory.municipalityId.name);
-    if (territory.communityId?.name) parts.push(territory.communityId.name);
+    if (zone.areaId?.name) parts.push(zone.areaId.name);
+    if (zone.municipalityId?.name) parts.push(zone.municipalityId.name);
+    if (zone.communityId?.name) parts.push(zone.communityId.name);
     return parts.length > 0 ? parts.join(" > ") : "No location assigned";
   };
 
   return (
-    <View style={styles.territoryCard}>
-      <View style={styles.territoryHeader}>
-        <View style={styles.territoryHeaderLeft}>
+    <View style={styles.zoneCard}>
+      <View style={styles.zoneHeader}>
+        <View style={styles.zoneHeaderLeft}>
           <View
             style={[
-              styles.territoryIconContainer,
-              territory.statistics.completionPercentage >= 70
-                ? styles.territoryIconGreen
-                : territory.statistics.completionPercentage >= 40
-                ? styles.territoryIconBlue
-                : styles.territoryIconOrange,
+              styles.zoneIconContainer,
+              zone.statistics.completionPercentage >= 70
+                ? styles.zoneIconGreen
+                : zone.statistics.completionPercentage >= 40
+                ? styles.zoneIconBlue
+                : styles.zoneIconOrange,
             ]}
           >
-            <Text style={styles.territoryIcon}>📍</Text>
+            <Text style={styles.zoneIcon}>📝</Text>
           </View>
-          <View style={styles.territoryInfo}>
-            <View style={styles.territoryTitleRow}>
-              <Text weight="semiBold" style={styles.territoryTitle}>
-                {territory.name}
+          <View style={styles.zoneInfo}>
+            <View style={styles.zoneTitleRow}>
+              <Text weight="semiBold" style={styles.zoneTitle}>
+                {zone.name}
               </Text>
-              {territory.isPrimary && (
+              {zone.isPrimary && (
                 <View style={styles.primaryBadge}>
                   <Body2 color={COLORS.primary[600]}>Primary</Body2>
                 </View>
               )}
             </View>
-            <Body2
-              color={COLORS.text.secondary}
-              style={styles.territoryDescription}
-            >
-              {territory.description || "No description"}
+            <Body2 color={COLORS.text.secondary} style={styles.zoneDescription}>
+              {zone.description || "No description"}
             </Body2>
-            <View style={styles.territoryStats}>
+            <View style={styles.zoneStats}>
               <Body2 color={COLORS.text.secondary}>
-                {territory.statistics.totalHouses} houses •{" "}
-                {territory.statistics.visitedCount} visited
+                {zone.statistics.totalHouses} houses •{" "}
+                {zone.statistics.visitedCount} visited
               </Body2>
             </View>
           </View>
@@ -398,23 +441,23 @@ function TerritoryCard({ territory, isCreatedByAgent }: TerritoryCardProps) {
           <View
             style={[
               styles.statusBadge,
-              territory.status === "ACTIVE"
+              zone.status === "ACTIVE"
                 ? styles.statusBadgeActive
                 : styles.statusBadgeInactive,
             ]}
           >
             <Body2
               color={
-                territory.status === "ACTIVE"
+                zone.status === "ACTIVE"
                   ? COLORS.success[700]
                   : COLORS.text.secondary
               }
               weight="medium"
             >
-              {territory.status}
+              {zone.status}
             </Body2>
           </View>
-          {territory.isScheduled && (
+          {zone.isScheduled && (
             <View style={styles.scheduledBadge}>
               <Body2 color={COLORS.white} weight="medium">
                 Scheduled
@@ -435,16 +478,14 @@ function TerritoryCard({ territory, isCreatedByAgent }: TerritoryCardProps) {
           Assignment:
         </Body2>
         <View style={styles.assignmentDetails}>
-          {territory.assignmentType === "team" && territory.teamName ? (
-            <Body2 color={COLORS.text.secondary}>
-              Team: {territory.teamName}
-            </Body2>
+          {zone.assignmentType === "team" && zone.teamName ? (
+            <Body2 color={COLORS.text.secondary}>Team: {zone.teamName}</Body2>
           ) : (
             <Body2 color={COLORS.text.secondary}>Individual</Body2>
           )}
-          {territory.scheduledDate && (
+          {zone.scheduledDate && (
             <Body2 color={COLORS.text.secondary}>
-              Scheduled: {formatDate(territory.scheduledDate)}
+              Scheduled: {formatDate(zone.scheduledDate)}
             </Body2>
           )}
         </View>
@@ -459,12 +500,12 @@ function TerritoryCard({ territory, isCreatedByAgent }: TerritoryCardProps) {
       </View>
 
       {/* Progress Bar */}
-      {!territory.isScheduled && territory.statistics.totalHouses > 0 && (
+      {!zone.isScheduled && zone.statistics.totalHouses > 0 && (
         <View style={styles.progressContainer}>
           <View style={styles.progressHeader}>
             <Body2 color={COLORS.text.secondary}>Progress</Body2>
             <Body2 color={COLORS.text.primary} weight="medium">
-              {territory.statistics.completionPercentage}%
+              {zone.statistics.completionPercentage}%
             </Body2>
           </View>
           <View style={styles.progressBar}>
@@ -472,11 +513,11 @@ function TerritoryCard({ territory, isCreatedByAgent }: TerritoryCardProps) {
               style={[
                 styles.progressFill,
                 {
-                  width: `${territory.statistics.completionPercentage}%`,
+                  width: `${zone.statistics.completionPercentage}%`,
                   backgroundColor:
-                    territory.statistics.completionPercentage >= 70
+                    zone.statistics.completionPercentage >= 70
                       ? COLORS.success[500]
-                      : territory.statistics.completionPercentage >= 40
+                      : zone.statistics.completionPercentage >= 40
                       ? COLORS.primary[500]
                       : COLORS.warning[500],
                 },
@@ -491,8 +532,8 @@ function TerritoryCard({ territory, isCreatedByAgent }: TerritoryCardProps) {
         <Button
           variant="outline"
           size="small"
-          title="Map View"
-          onPress={handleMapView}
+          title="View Zone"
+          onPress={() => router.push(`/manual-zone-form?zoneId=${zone._id}`)}
           containerStyle={styles.actionButton}
         />
         {isCreatedByAgent && (
@@ -500,12 +541,11 @@ function TerritoryCard({ territory, isCreatedByAgent }: TerritoryCardProps) {
             variant="outline"
             size="small"
             title="Edit"
-            onPress={() =>
-              router.push({
-                pathname: "/edit-zone/[territory_id]",
-                params: { territory_id: territory._id },
-              })
-            }
+            onPress={() => {
+              console.log("📝 Edit button pressed for zone:", zone._id);
+              console.log("📝 Navigating to:", `/manual-zone-form?zoneId=${zone._id}&mode=edit`);
+              router.push(`/manual-zone-form?zoneId=${zone._id}&mode=edit`);
+            }}
             containerStyle={styles.actionButton}
           />
         )}
@@ -514,7 +554,7 @@ function TerritoryCard({ territory, isCreatedByAgent }: TerritoryCardProps) {
   );
 }
 
-export default MyTerritoryScreen;
+export default ManualZoneScreen;
 
 const styles = StyleSheet.create({
   container: {
@@ -646,12 +686,12 @@ const styles = StyleSheet.create({
   emptyText: {
     textAlign: "center",
   },
-  territoriesList: {
+  zonesList: {
     paddingHorizontal: responsiveSpacing(PADDING.screenLarge),
     paddingTop: responsiveSpacing(SPACING.md),
     gap: responsiveSpacing(SPACING.md),
   },
-  territoryCard: {
+  zoneCard: {
     backgroundColor: COLORS.white,
     borderRadius: responsiveScale(12),
     padding: responsiveSpacing(SPACING.md),
@@ -661,45 +701,45 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 1,
   },
-  territoryHeader: {
+  zoneHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     marginBottom: responsiveSpacing(SPACING.md),
   },
-  territoryHeaderLeft: {
+  zoneHeaderLeft: {
     flexDirection: "row",
     flex: 1,
     gap: responsiveSpacing(SPACING.sm),
   },
-  territoryIconContainer: {
+  zoneIconContainer: {
     width: responsiveScale(40),
     height: responsiveScale(40),
     borderRadius: responsiveScale(20),
     justifyContent: "center",
     alignItems: "center",
   },
-  territoryIconGreen: {
+  zoneIconGreen: {
     backgroundColor: COLORS.success[100],
   },
-  territoryIconBlue: {
+  zoneIconBlue: {
     backgroundColor: COLORS.primary[100],
   },
-  territoryIconOrange: {
+  zoneIconOrange: {
     backgroundColor: COLORS.warning[100],
   },
-  territoryIcon: {
+  zoneIcon: {
     fontSize: responsiveScale(20),
   },
-  territoryInfo: {
+  zoneInfo: {
     flex: 1,
   },
-  territoryTitleRow: {
+  zoneTitleRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: responsiveSpacing(SPACING.xs),
     marginBottom: responsiveSpacing(SPACING.xs / 2),
   },
-  territoryTitle: {
+  zoneTitle: {
     fontSize: responsiveScale(16),
     color: COLORS.text.primary,
   },
@@ -709,10 +749,10 @@ const styles = StyleSheet.create({
     paddingVertical: responsiveSpacing(SPACING.xs / 2),
     borderRadius: responsiveScale(8),
   },
-  territoryDescription: {
+  zoneDescription: {
     marginBottom: responsiveSpacing(SPACING.xs / 2),
   },
-  territoryStats: {
+  zoneStats: {
     marginTop: responsiveSpacing(SPACING.xs / 2),
   },
   statusBadges: {
