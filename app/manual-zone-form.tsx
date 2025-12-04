@@ -54,10 +54,10 @@ const getStatusDisplayName = (status: string): string => {
     "not-visited": "Not Visited",
     interested: "Interested",
     visited: "Visited",
-    callback: "Callback",
     appointment: "Appointment",
     "follow-up": "Follow Up",
     "not-interested": "Not Interested",
+    "not-opened": "Not Opened",
   };
   return statusNames[status] || status;
 };
@@ -67,10 +67,10 @@ const statusColors: Record<string, string> = {
   "not-visited": "#EF4444",
   interested: "#F59E0B",
   visited: "#10B981",
-  callback: "#8B5CF6",
   appointment: "#3B82F6",
   "follow-up": "#EC4899",
   "not-interested": "#6B7280",
+  "not-opened": "#F97316",
 };
 
 export default function ManualZoneFormScreen() {
@@ -434,6 +434,9 @@ export default function ManualZoneFormScreen() {
     // Close detail modal if open
     setIsDetailModalOpen(false);
 
+    // Get today's date in YYYY-MM-DD format
+    const today = new Date().toISOString().split("T")[0];
+
     // Initialize form data with property values
     setEditFormData({
       address: property.address,
@@ -443,7 +446,7 @@ export default function ManualZoneFormScreen() {
       status: property.status,
       lastVisited: property.lastVisited
         ? new Date(property.lastVisited).toISOString().split("T")[0]
-        : "",
+        : today, // Default to today's date if not set
       notes: property.notes || "",
       phone: "",
       email: "",
@@ -1482,7 +1485,7 @@ export default function ManualZoneFormScreen() {
                   "not-visited",
                   "interested",
                   "visited",
-                  "callback",
+                  "not-opened",
                   "appointment",
                   "follow-up",
                   "not-interested",

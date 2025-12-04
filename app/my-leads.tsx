@@ -33,10 +33,10 @@ const statusColors: Record<string, string> = {
   "not-visited": "#EF4444",
   interested: "#F59E0B",
   visited: "#10B981",
-  callback: "#8B5CF6",
   appointment: "#3B82F6",
   "follow-up": "#EC4899",
   "not-interested": "#6B7280",
+  "not-opened": "#F97316",
 };
 
 const getStatusDisplayName = (status: string): string => {
@@ -44,10 +44,10 @@ const getStatusDisplayName = (status: string): string => {
     "not-visited": "Not Visited",
     interested: "Interested",
     visited: "Visited",
-    callback: "Callback",
     appointment: "Appointment",
     "follow-up": "Follow-up",
     "not-interested": "Not Interested",
+    "not-opened": "Not Opened",
   };
   return statusNames[status] || status;
 };

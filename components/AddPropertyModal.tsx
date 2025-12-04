@@ -60,10 +60,10 @@ const getStatusDisplayName = (status: Property["status"]): string => {
     "not-visited": "⏳ Not Visited",
     interested: "✓ Interested",
     visited: "✓ Visited",
-    callback: "📞 Callback",
     appointment: "📅 Appointment",
     "follow-up": "🔄 Follow-up",
     "not-interested": "❌ Not Interested",
+    "not-opened": "🚪 Not Opened",
   };
   return statusMap[status] || "⏳ Not Visited";
 };
@@ -1275,7 +1275,7 @@ const AddPropertyModal = React.forwardRef<
                   "not-visited",
                   "interested",
                   "visited",
-                  "callback",
+                  "not-opened",
                   "appointment",
                   "follow-up",
                   "not-interested",

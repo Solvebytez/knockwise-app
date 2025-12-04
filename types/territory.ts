@@ -4,10 +4,10 @@ export type ResidentStatus =
   | "not-visited"
   | "interested"
   | "visited"
-  | "callback"
   | "appointment"
   | "follow-up"
-  | "not-interested";
+  | "not-interested"
+  | "not-opened";
 
 export interface Resident {
   id: string;

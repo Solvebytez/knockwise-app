@@ -322,10 +322,10 @@ export default function TerritoryMapViewScreen() {
     "not-visited": "#EF4444", // red
     interested: "#F59E0B", // amber
     visited: "#10B981", // emerald
-    callback: "#8B5CF6", // violet
     appointment: "#3B82F6", // blue
     "follow-up": "#EC4899", // pink
     "not-interested": "#6B7280", // gray
+    "not-opened": "#F97316", // orange
   };
 
   // Fetch territory map view data (same API endpoint as web client)
@@ -692,6 +692,9 @@ export default function TerritoryMapViewScreen() {
     setEditPropertyId(property._id); // Set property ID to trigger React Query
     setIsEditModalOpen(true);
 
+    // Get today's date in YYYY-MM-DD format
+    const today = new Date().toISOString().split("T")[0];
+
     // Initialize form data with basic property values (from property list)
     setEditFormData({
       address: property.address,
@@ -701,7 +704,7 @@ export default function TerritoryMapViewScreen() {
       status: property.status,
       lastVisited: property.lastVisited
         ? new Date(property.lastVisited).toISOString().split("T")[0]
-        : "",
+        : today, // Default to today's date if not set
       notes: property.notes || "",
       phone: "",
       email: "",
@@ -719,6 +722,8 @@ export default function TerritoryMapViewScreen() {
   useEffect(() => {
     if (editPropertyDetails && selectedProperty) {
       console.log("📝 Updating form data with cached/fetched property details");
+      // Get today's date in YYYY-MM-DD format
+      const today = new Date().toISOString().split("T")[0];
       setEditFormData((prev) => ({
         ...prev,
         lastVisited: (() => {
@@ -730,7 +735,7 @@ export default function TerritoryMapViewScreen() {
           const propertyDate = selectedProperty.lastVisited
             ? new Date(selectedProperty.lastVisited).toISOString().split("T")[0]
             : "";
-          return detailedDate || propertyDate || prev.lastVisited;
+          return detailedDate || propertyDate || prev.lastVisited || today;
         })(),
         notes:
           editPropertyDetails?.resident?.notes ||
@@ -2050,10 +2055,10 @@ export default function TerritoryMapViewScreen() {
       "not-visited": "⏳ Not Visited",
       interested: "✓ Interested",
       visited: "✓ Visited",
-      callback: "📞 Callback",
       appointment: "📅 Appointment",
       "follow-up": "🔄 Follow-up",
       "not-interested": "❌ Not Interested",
+      "not-opened": "🚪 Not Opened",
     };
     return statusMap[status] || "⏳ Not Visited";
   };
@@ -2064,10 +2069,10 @@ export default function TerritoryMapViewScreen() {
       "not-visited": "Not Visited",
       interested: "Interested",
       visited: "Visited",
-      callback: "Callback",
       appointment: "Appointment",
       "follow-up": "Follow-up",
       "not-interested": "Not Interested",
+      "not-opened": "Not Opened",
     };
     return statusMap[status] || "Not Visited";
   };
@@ -2078,10 +2083,10 @@ export default function TerritoryMapViewScreen() {
       "not-visited": 0,
       interested: 0,
       visited: 0,
-      callback: 0,
       appointment: 0,
       "follow-up": 0,
       "not-interested": 0,
+      "not-opened": 0,
     };
 
     properties.forEach((property) => {
@@ -2111,10 +2116,10 @@ export default function TerritoryMapViewScreen() {
       "not-visited": "red",
       interested: "orange",
       visited: "green",
-      callback: "purple",
       appointment: "blue",
       "follow-up": "purple",
       "not-interested": "gray",
+      "not-opened": "orange",
     };
     return colorMap[status] || "red";
   };
@@ -2858,10 +2863,10 @@ export default function TerritoryMapViewScreen() {
                   "not-visited",
                   "interested",
                   "visited",
-                  "callback",
                   "appointment",
                   "follow-up",
                   "not-interested",
+                  "not-opened",
                 ] as Property["status"][]
               ).map((status) => (
                 <Pressable
@@ -3962,7 +3967,7 @@ export default function TerritoryMapViewScreen() {
                   "not-visited",
                   "interested",
                   "visited",
-                  "callback",
+                  "not-opened",
                   "appointment",
                   "follow-up",
                   "not-interested",
