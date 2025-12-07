@@ -650,29 +650,8 @@ export default function TerritoryMapViewScreen() {
 
   // Handle property click from list
   const handlePropertyClick = (property: Property) => {
-    setSelectedProperty(property);
-    setHighlightedPropertyId(property._id);
-
-    // Open modal immediately - React Query will fetch (or use cache)
-    setIsDetailModalOpen(true);
-
-    // Center map on selected property
-    if (mapRef.current) {
-      mapRef.current.animateToRegion(
-        {
-          latitude: property.coordinates[1],
-          longitude: property.coordinates[0],
-          latitudeDelta: 0.01,
-          longitudeDelta: 0.01,
-        },
-        500
-      );
-    }
-
-    // Clear highlight after 2 seconds
-    setTimeout(() => {
-      setHighlightedPropertyId(null);
-    }, 2000);
+    // Open edit modal directly instead of detail modal
+    handleEditProperty(property);
   };
 
   // Handle close detail modal
@@ -3012,12 +2991,10 @@ export default function TerritoryMapViewScreen() {
                     </View>
                   </View>
 
-                  {/* Footer: House Number + Short Address */}
-                  <View style={styles.propertyCardFooter}>
-                    <Text style={styles.propertyCardShortAddress}>
-                      {getShortAddress(property)}
-                    </Text>
-                  </View>
+                  {/* Notes */}
+                  <Text style={styles.propertyNotes}>
+                    {property.notes || "No note"}
+                  </Text>
                 </View>
               </TouchableOpacity>
             ))
@@ -3641,6 +3618,23 @@ export default function TerritoryMapViewScreen() {
             <View style={styles.editModalHeader}>
               <View style={styles.editModalHeaderLeft}>
                 <Text style={styles.editModalTitle}>Edit Property</Text>
+                {/* Eye icon to view details */}
+                {selectedProperty && (
+                  <TouchableOpacity
+                    style={styles.editModalEyeButton}
+                    onPress={() => {
+                      setIsEditModalOpen(false);
+                      setIsDetailModalOpen(true);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons
+                      name="eye-outline"
+                      size={responsiveScale(20)}
+                      color={COLORS.text.secondary}
+                    />
+                  </TouchableOpacity>
+                )}
                 {/* Previous Property Chevron - only show if more than 1 property */}
                 {selectedProperty && filteredProperties.length > 1 && (
                   <TouchableOpacity
@@ -4855,6 +4849,12 @@ const styles = StyleSheet.create({
   propertyCardFooter: {
     marginTop: responsiveSpacing(SPACING.xs / 2),
   },
+  propertyNotes: {
+    marginTop: responsiveSpacing(SPACING.xs),
+    fontSize: responsiveScale(12),
+    color: COLORS.text.light,
+    fontStyle: "italic",
+  },
   statusBadge: {
     paddingHorizontal: responsiveSpacing(SPACING.xs / 2),
     paddingTop: responsiveSpacing(SPACING.xs / 8),
@@ -5329,6 +5329,11 @@ const styles = StyleSheet.create({
     fontSize: responsiveScale(20),
     fontWeight: "600",
     color: COLORS.text.primary,
+  },
+  editModalEyeButton: {
+    padding: responsiveSpacing(SPACING.xs / 2),
+    justifyContent: "center",
+    alignItems: "center",
   },
   editModalChevronButton: {
     padding: responsiveSpacing(SPACING.xs),
