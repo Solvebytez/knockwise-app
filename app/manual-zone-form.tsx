@@ -376,8 +376,18 @@ export default function ManualZoneFormScreen() {
   useEffect(() => {
     if (editPropertyDetails && selectedProperty) {
       console.log("📝 Updating form data with fetched property details");
+      // Get today's date in YYYY-MM-DD format
+      const today = new Date().toISOString().split("T")[0];
       setEditFormData((prev) => ({
-        ...prev,
+        // Update all fields from selectedProperty first (for navigation)
+        address: selectedProperty.address || prev.address,
+        houseNumber:
+          selectedProperty.houseNumber?.toString() || prev.houseNumber,
+        longitude:
+          selectedProperty.coordinates[0]?.toString() || prev.longitude,
+        latitude: selectedProperty.coordinates[1]?.toString() || prev.latitude,
+        status: selectedProperty.status || prev.status,
+        // Then update with detailed data if available
         lastVisited: (() => {
           const detailedDate = editPropertyDetails?.resident?.lastVisited
             ? new Date(editPropertyDetails.resident.lastVisited)
@@ -387,7 +397,7 @@ export default function ManualZoneFormScreen() {
           const propertyDate = selectedProperty.lastVisited
             ? new Date(selectedProperty.lastVisited).toISOString().split("T")[0]
             : "";
-          return detailedDate || propertyDate || prev.lastVisited;
+          return detailedDate || propertyDate || prev.lastVisited || today;
         })(),
         notes:
           editPropertyDetails?.resident?.notes ||
@@ -564,9 +574,17 @@ export default function ManualZoneFormScreen() {
 
   // Handle update resident
   const handleUpdateResident = async (keepModalOpen = false) => {
-    if (!selectedProperty) return;
+    console.log(
+      `🔵 [Save] handleUpdateResident called - keepModalOpen: ${keepModalOpen}`
+    );
+
+    if (!selectedProperty) {
+      console.log("❌ [Save] No selectedProperty, returning early");
+      return;
+    }
 
     const propertyId = editPropertyId || selectedProperty._id;
+    console.log(`🔵 [Save] Property ID: ${propertyId}`);
 
     try {
       setIsUpdatingResident(true);
@@ -591,18 +609,33 @@ export default function ManualZoneFormScreen() {
         ownerMailingAddress: editFormData.ownerMailingAddress || undefined,
       };
 
-      console.log("🔄 Updating resident:", propertyId, updateData);
+      console.log(`🔄 Updating resident: ${propertyId}`);
+      console.log(`🔄 Update data keys: ${Object.keys(updateData).join(", ")}`);
 
       const response = await apiInstance.put(
         `/residents/${propertyId}`,
         updateData
       );
 
-      console.log("✅ Update response:", response.data);
+      console.log(`✅ Update response success: ${response.data?.success}`);
 
       if (response.data.success) {
-        if (!keepModalOpen) {
-          Alert.alert("Success", "Property updated successfully!");
+        console.log(`✅ [Save] Property update successful: ${propertyId}`);
+
+        // Update selectedProperty state immediately with saved values
+        // This prevents navigateToProperty from detecting changes and trying to save again
+        if (selectedProperty) {
+          setSelectedProperty({
+            ...selectedProperty,
+            address: updateData.address,
+            houseNumber: updateData.houseNumber || selectedProperty.houseNumber,
+            coordinates: updateData.coordinates as [number, number],
+            status: updateData.status,
+            lastVisited: updateData.lastVisited || selectedProperty.lastVisited,
+            notes: updateData.notes || selectedProperty.notes,
+            phone: updateData.phone || selectedProperty.phone,
+            email: updateData.email || selectedProperty.email,
+          });
         }
 
         // Invalidate and refetch
@@ -616,12 +649,135 @@ export default function ManualZoneFormScreen() {
         queryClient.invalidateQueries({ queryKey: ["agentDashboardStats"] });
         queryClient.invalidateQueries({ queryKey: ["manualZones"] });
 
-        // Refetch properties
-        void refetchProperties();
+        // Await refetch to ensure properties are updated
+        const refetchResult = await refetchProperties();
+        const refetchedProperties: Property[] =
+          refetchResult.data?.data?.residents || [];
 
-        // Close modal only if not keeping it open
+        // Compute filteredProperties using the same logic as useMemo
+        let computedFilteredProperties: Property[] = [];
+        if (selectedMode === "sequential") {
+          computedFilteredProperties = [...refetchedProperties].sort(
+            (a, b) => a.houseNumber - b.houseNumber
+          );
+        } else if (selectedMode === "odd") {
+          computedFilteredProperties = refetchedProperties
+            .filter((p) => p.houseNumber % 2 !== 0)
+            .sort((a, b) => a.houseNumber - b.houseNumber);
+        } else {
+          computedFilteredProperties = refetchedProperties
+            .filter((p) => p.houseNumber % 2 === 0)
+            .sort((a, b) => a.houseNumber - b.houseNumber);
+        }
+
+        console.log(
+          `🔍 [Save] Navigation check - keepModalOpen: ${keepModalOpen}`
+        );
+        console.log(`🔍 [Save] Property ID just saved: ${propertyId}`);
+        console.log(
+          `🔍 [Save] computedFilteredProperties.length: ${computedFilteredProperties.length}`
+        );
+        console.log(
+          `🔍 [Save] computedFilteredProperties IDs: ${JSON.stringify(
+            computedFilteredProperties.map((p) => p._id)
+          )}`
+        );
+
+        // If not keeping modal open, check if we should auto-navigate to next property
         if (!keepModalOpen) {
+          console.log(
+            "✅ [Save] Will attempt navigation (keepModalOpen is false)"
+          );
+
+          // Use the computed filteredProperties for navigation
+          const updatedFilteredProperties = computedFilteredProperties;
+
+          // Auto-navigate to next property if multiple properties exist
+          if (updatedFilteredProperties.length > 1) {
+            console.log("✅ [Save] Conditions met for navigation");
+            console.log(
+              `🔍 [Save] updatedFilteredProperties.length: ${updatedFilteredProperties.length}`
+            );
+
+            // Find current property index using the propertyId we just saved
+            const currentIndex = updatedFilteredProperties.findIndex(
+              (p) => p._id === propertyId
+            );
+
+            console.log(`🔍 [Save] Current property index: ${currentIndex}`);
+            console.log(`🔍 [Save] Looking for property ID: ${propertyId}`);
+
+            if (currentIndex !== -1) {
+              // Get next property (wrap around to first if at end)
+              const nextIndex =
+                (currentIndex + 1) % updatedFilteredProperties.length;
+              const nextProperty = updatedFilteredProperties[nextIndex];
+
+              console.log(
+                `✅ [Save] Found next property - index: ${nextIndex}`
+              );
+              console.log(`✅ [Save] Next property ID: ${nextProperty._id}`);
+              console.log(
+                `✅ [Save] Next property address: ${
+                  nextProperty.address || "N/A"
+                }`
+              );
+
+              // Navigate to next property directly (skip save check since we just saved)
+              setSelectedProperty(nextProperty);
+              setEditPropertyId(nextProperty._id);
+
+              // Get today's date in YYYY-MM-DD format
+              const today = new Date().toISOString().split("T")[0];
+
+              // Initialize form data with next property values
+              setEditFormData({
+                address: nextProperty.address,
+                houseNumber: nextProperty.houseNumber?.toString() || "",
+                longitude: nextProperty.coordinates[0]?.toString() || "",
+                latitude: nextProperty.coordinates[1]?.toString() || "",
+                status: nextProperty.status,
+                lastVisited: nextProperty.lastVisited
+                  ? new Date(nextProperty.lastVisited)
+                      .toISOString()
+                      .split("T")[0]
+                  : today,
+                notes: nextProperty.notes || "",
+                phone: "",
+                email: "",
+                ownerName: "",
+                ownerPhone: "",
+                ownerEmail: "",
+                ownerMailingAddress: "",
+              });
+
+              // Invalidate queries to refresh property details
+              void queryClient.invalidateQueries({
+                queryKey: ["propertyDetails", nextProperty._id],
+              });
+
+              console.log(
+                "✅ [Save] Navigation completed - showing next property"
+              );
+              // Don't show alert, just navigate silently
+              return; // Keep modal open, showing next property
+            } else {
+              console.log(
+                "❌ [Save] Current property not found in filteredProperties list"
+              );
+            }
+          } else {
+            console.log(
+              `❌ [Save] Navigation skipped - only ${updatedFilteredProperties.length} property(ies)`
+            );
+          }
+
+          // If only 1 property or navigation failed, show success and close modal
+          console.log("⚠️ [Save] Showing success alert and closing modal");
+          Alert.alert("Success", "Property updated successfully!");
           handleCloseEditModal();
+        } else {
+          console.log("ℹ️ [Save] Navigation skipped - keepModalOpen is true");
         }
       }
     } catch (error: any) {

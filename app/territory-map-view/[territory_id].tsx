@@ -725,7 +725,13 @@ export default function TerritoryMapViewScreen() {
       // Get today's date in YYYY-MM-DD format
       const today = new Date().toISOString().split("T")[0];
       setEditFormData((prev) => ({
-        ...prev,
+        // Update all fields from selectedProperty first (for navigation)
+        address: selectedProperty.address || prev.address,
+        houseNumber: selectedProperty.houseNumber?.toString() || prev.houseNumber,
+        longitude: selectedProperty.coordinates[0]?.toString() || prev.longitude,
+        latitude: selectedProperty.coordinates[1]?.toString() || prev.latitude,
+        status: selectedProperty.status || prev.status,
+        // Then update with detailed data if available
         lastVisited: (() => {
           const detailedDate = editPropertyDetails?.resident?.lastVisited
             ? new Date(editPropertyDetails.resident.lastVisited)
@@ -1160,10 +1166,16 @@ export default function TerritoryMapViewScreen() {
 
   // Handle update resident (matching web client)
   const handleUpdateResident = async (keepModalOpen = false) => {
-    if (!selectedProperty) return;
+    console.log(`🔵 [Save] handleUpdateResident called - keepModalOpen: ${keepModalOpen}`);
+    
+    if (!selectedProperty) {
+      console.log("❌ [Save] No selectedProperty, returning early");
+      return;
+    }
 
     // Use editPropertyId if available, otherwise selectedProperty._id
     const propertyId = editPropertyId || selectedProperty._id;
+    console.log(`🔵 [Save] Property ID: ${propertyId}`);
 
     try {
       setIsUpdatingResident(true);
@@ -1188,21 +1200,19 @@ export default function TerritoryMapViewScreen() {
         ownerMailingAddress: editFormData.ownerMailingAddress || undefined,
       };
 
-      console.log("🔄 Updating resident:", propertyId, updateData);
+      console.log(`🔄 Updating resident: ${propertyId}`);
+      console.log(`🔄 Update data keys: ${Object.keys(updateData).join(", ")}`);
 
       const response = await apiInstance.put(
         `/residents/${propertyId}`,
         updateData
       );
 
-      console.log("✅ Update response:", response.data);
+      console.log(`✅ Update response success: ${response.data?.success}`);
 
       if (response.data.success) {
-        if (!keepModalOpen) {
-          // Show success message
-          Alert.alert("Success", "Property updated successfully!");
-        }
-
+        console.log(`✅ [Save] Property update successful: ${propertyId}`);
+        
         // Invalidate and refetch property details cache
         queryClient.invalidateQueries({
           queryKey: ["propertyDetails", propertyId],
@@ -1230,27 +1240,28 @@ export default function TerritoryMapViewScreen() {
           queryKey: ["admin", "assignment-status"],
         });
 
-        // Update the local state
-        setProperties((prev) =>
-          prev.map((prop) =>
-            prop._id === propertyId
-              ? {
-                  ...prop,
-                  address: updateData.address,
-                  houseNumber: updateData.houseNumber || prop.houseNumber,
-                  coordinates: updateData.coordinates as [number, number],
-                  status: updateData.status,
-                  lastVisited: updateData.lastVisited,
-                  ...(response.data.data?.lastUpdatedBy && {
-                    lastUpdatedBy: response.data.data.lastUpdatedBy,
-                  }),
-                  notes: updateData.notes,
-                  phone: updateData.phone,
-                  email: updateData.email,
-                }
-              : prop
-          )
+        // Compute updated properties list synchronously for navigation
+        const updatedPropertiesForNav = properties.map((prop) =>
+          prop._id === propertyId
+            ? {
+                ...prop,
+                address: updateData.address,
+                houseNumber: updateData.houseNumber || prop.houseNumber,
+                coordinates: updateData.coordinates as [number, number],
+                status: updateData.status,
+                lastVisited: updateData.lastVisited,
+                ...(response.data.data?.lastUpdatedBy && {
+                  lastUpdatedBy: response.data.data.lastUpdatedBy,
+                }),
+                notes: updateData.notes,
+                phone: updateData.phone,
+                email: updateData.email,
+              }
+            : prop
         );
+
+        // Update the local state
+        setProperties(updatedPropertiesForNav);
 
         // Update filtered properties
         setFilteredProperties((prev) =>
@@ -1294,9 +1305,114 @@ export default function TerritoryMapViewScreen() {
             : prev
         );
 
-        // Close modal only if not keeping it open
+        // Compute filteredProperties using the same logic as useEffect
+        let computedFiltered = [...updatedPropertiesForNav];
+
+        // Apply search filter
+        if (searchTerm.trim()) {
+          const searchLower = searchTerm.toLowerCase();
+          computedFiltered = computedFiltered.filter(
+            (property) =>
+              property.address.toLowerCase().includes(searchLower) ||
+              property.houseNumber.toString().includes(searchTerm)
+          );
+        }
+
+        // Apply status filter
+        if (statusFilter && statusFilter !== "All Status") {
+          computedFiltered = computedFiltered.filter(
+            (property) => property.status === statusFilter
+          );
+        }
+
+        // Apply data source filter
+        if (dataSourceFilter && dataSourceFilter !== "All Sources") {
+          computedFiltered = computedFiltered.filter(
+            (property) => property.dataSource === dataSourceFilter
+          );
+        }
+
+        // Apply sorting
+        if (sortBy === "Sequential") {
+          computedFiltered = computedFiltered.sort((a, b) => a.houseNumber - b.houseNumber);
+        } else if (sortBy === "Odd") {
+          computedFiltered = computedFiltered
+            .filter((property) => property.houseNumber % 2 === 1)
+            .sort((a, b) => a.houseNumber - b.houseNumber);
+        } else if (sortBy === "Even") {
+          computedFiltered = computedFiltered
+            .filter((property) => property.houseNumber % 2 === 0)
+            .sort((a, b) => a.houseNumber - b.houseNumber);
+        }
+
+        console.log(`🔍 [Save] Navigation check - keepModalOpen: ${keepModalOpen}`);
+        console.log(`🔍 [Save] Property ID just saved: ${propertyId}`);
+        console.log(`🔍 [Save] computedFiltered.length: ${computedFiltered.length}`);
+        console.log(`🔍 [Save] computedFiltered IDs: ${JSON.stringify(computedFiltered.map(p => p._id))}`);
+
+        // If not keeping modal open, check if we should auto-navigate to next property
         if (!keepModalOpen) {
-          handleCloseEditModal();
+          console.log("✅ [Save] Will attempt navigation (keepModalOpen is false)");
+          
+          // Wait for useEffect to update filteredProperties with the latest data
+          await new Promise((resolve) => setTimeout(resolve, 200));
+
+          // Use filteredProperties (which is kept in sync by useEffect) for navigation
+          // This ensures we're using the same source as the chevron buttons
+          if (filteredProperties.length > 1) {
+            console.log("✅ [Save] Conditions met for navigation");
+            console.log(`🔍 [Save] filteredProperties.length: ${filteredProperties.length}`);
+            console.log(`🔍 [Save] filteredProperties IDs: ${JSON.stringify(filteredProperties.map(p => p._id))}`);
+            
+            // Find current property index using the propertyId we just saved
+            const currentIndex = filteredProperties.findIndex(
+              (p) => p._id === propertyId
+            );
+
+            console.log(`🔍 [Save] Current property index: ${currentIndex}`);
+            console.log(`🔍 [Save] Looking for property ID: ${propertyId}`);
+
+            if (currentIndex !== -1) {
+              // Get next property (wrap around to first if at end)
+              const nextIndex = (currentIndex + 1) % filteredProperties.length;
+              const nextPropertyToNavigate = filteredProperties[nextIndex];
+
+              console.log(`✅ [Save] Found next property - index: ${nextIndex}`);
+              console.log(`✅ [Save] Next property ID: ${nextPropertyToNavigate._id}`);
+              console.log(`✅ [Save] Next property address: ${nextPropertyToNavigate.address || 'N/A'}`);
+
+              // Update selectedProperty to saved values first (so navigateToProperty doesn't try to save again)
+              // This ensures the form data matches what we just saved
+              const updatedSelectedProperty = updatedPropertiesForNav.find(p => p._id === propertyId);
+              if (updatedSelectedProperty) {
+                setSelectedProperty(updatedSelectedProperty);
+              }
+
+              // Wait a moment for selectedProperty to update
+              await new Promise((resolve) => setTimeout(resolve, 100));
+
+              // Use navigateToProperty which properly handles form data and queries
+              // This is the same function the chevron buttons use
+              await navigateToProperty(nextPropertyToNavigate);
+
+              console.log("✅ [Save] Navigation completed - showing next property");
+              return; // Keep modal open, showing next property
+            } else {
+              console.log("❌ [Save] Current property not found in filteredProperties list");
+              // If navigation failed, show success and close modal
+              console.log("⚠️ [Save] Showing success alert and closing modal");
+              Alert.alert("Success", "Property updated successfully!");
+              handleCloseEditModal();
+            }
+          } else {
+            // If only 1 property, show success and close modal
+            console.log(`❌ [Save] Navigation skipped - only ${filteredProperties.length} property(ies)`);
+            console.log("⚠️ [Save] Showing success alert and closing modal");
+            Alert.alert("Success", "Property updated successfully!");
+            handleCloseEditModal();
+          }
+        } else {
+          console.log("ℹ️ [Save] Navigation skipped - keepModalOpen is true");
         }
       }
     } catch (error: any) {
@@ -3980,7 +4096,7 @@ export default function TerritoryMapViewScreen() {
                   (!isEditFormValid() || isUpdatingResident) &&
                     styles.editModalSaveButtonDisabled,
                 ]}
-                onPress={handleUpdateResident}
+                onPress={() => handleUpdateResident(false)}
                 disabled={isUpdatingResident || !isEditFormValid()}
                 activeOpacity={0.7}
               >
