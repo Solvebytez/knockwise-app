@@ -1159,7 +1159,7 @@ export default function TerritoryMapViewScreen() {
   };
 
   // Handle update resident (matching web client)
-  const handleUpdateResident = async () => {
+  const handleUpdateResident = async (keepModalOpen = false) => {
     if (!selectedProperty) return;
 
     // Use editPropertyId if available, otherwise selectedProperty._id
@@ -1198,8 +1198,10 @@ export default function TerritoryMapViewScreen() {
       console.log("✅ Update response:", response.data);
 
       if (response.data.success) {
-        // Show success message
-        Alert.alert("Success", "Property updated successfully!");
+        if (!keepModalOpen) {
+          // Show success message
+          Alert.alert("Success", "Property updated successfully!");
+        }
 
         // Invalidate and refetch property details cache
         queryClient.invalidateQueries({
@@ -1292,8 +1294,10 @@ export default function TerritoryMapViewScreen() {
             : prev
         );
 
-        // Close modal after successful update
-        handleCloseEditModal();
+        // Close modal only if not keeping it open
+        if (!keepModalOpen) {
+          handleCloseEditModal();
+        }
       }
     } catch (error: any) {
       console.error("Error updating resident:", error);
@@ -1323,6 +1327,100 @@ export default function TerritoryMapViewScreen() {
     } finally {
       setIsUpdatingResident(false);
     }
+  };
+
+  // Helper function to navigate to a specific property index
+  const navigateToProperty = async (targetProperty: Property) => {
+    // First, save current property if there are changes
+    if (selectedProperty) {
+      const hasChanges =
+        editFormData.address !== selectedProperty.address ||
+        editFormData.houseNumber !==
+          (selectedProperty.houseNumber?.toString() || "") ||
+        editFormData.status !== selectedProperty.status ||
+        editFormData.notes !== (selectedProperty.notes || "") ||
+        editFormData.lastVisited !==
+          (selectedProperty.lastVisited
+            ? new Date(selectedProperty.lastVisited).toISOString().split("T")[0]
+            : "");
+
+      if (hasChanges && isEditFormValid()) {
+        // Save current property first (keep modal open)
+        await handleUpdateResident(true);
+        // Wait a bit for the save to complete
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+
+    // Update to target property
+    setSelectedProperty(targetProperty);
+    setEditPropertyId(targetProperty._id);
+
+    // Get today's date in YYYY-MM-DD format
+    const today = new Date().toISOString().split("T")[0];
+
+    // Initialize form data with target property values
+    setEditFormData({
+      address: targetProperty.address,
+      houseNumber: targetProperty.houseNumber?.toString() || "",
+      longitude: targetProperty.coordinates[0]?.toString() || "",
+      latitude: targetProperty.coordinates[1]?.toString() || "",
+      status: targetProperty.status,
+      lastVisited: targetProperty.lastVisited
+        ? new Date(targetProperty.lastVisited).toISOString().split("T")[0]
+        : today,
+      notes: targetProperty.notes || "",
+      phone: "",
+      email: "",
+      ownerName: "",
+      ownerPhone: "",
+      ownerEmail: "",
+      ownerMailingAddress: "",
+    });
+
+    // Invalidate queries to refresh property details
+    void queryClient.invalidateQueries({
+      queryKey: ["propertyDetails", targetProperty._id],
+    });
+  };
+
+  // Handle previous property in edit modal (wrap around)
+  const handlePreviousPropertyEdit = async () => {
+    if (!selectedProperty || filteredProperties.length <= 1) return;
+
+    // Find current property index
+    const currentIndex = filteredProperties.findIndex(
+      (p) => p._id === selectedProperty._id
+    );
+
+    if (currentIndex === -1) return;
+
+    // Get previous property (wrap around to last if at first)
+    const previousIndex =
+      currentIndex === 0
+        ? filteredProperties.length - 1
+        : currentIndex - 1;
+    const previousProperty = filteredProperties[previousIndex];
+
+    await navigateToProperty(previousProperty);
+  };
+
+  // Handle next property in edit modal (wrap around)
+  const handleNextPropertyEdit = async () => {
+    if (!selectedProperty || filteredProperties.length <= 1) return;
+
+    // Find current property index
+    const currentIndex = filteredProperties.findIndex(
+      (p) => p._id === selectedProperty._id
+    );
+
+    if (currentIndex === -1) return;
+
+    // Get next property (wrap around to first if at end)
+    const nextIndex = (currentIndex + 1) % filteredProperties.length;
+    const nextProperty = filteredProperties[nextIndex];
+
+    await navigateToProperty(nextProperty);
   };
 
   // Handle close edit modal
@@ -3425,7 +3523,55 @@ export default function TerritoryMapViewScreen() {
           <View style={styles.editModalContent}>
             {/* Modal Header */}
             <View style={styles.editModalHeader}>
-              <Text style={styles.editModalTitle}>Edit Property</Text>
+              <View style={styles.editModalHeaderLeft}>
+                <Text style={styles.editModalTitle}>Edit Property</Text>
+                {/* Previous Property Chevron - only show if more than 1 property */}
+                {selectedProperty && filteredProperties.length > 1 && (
+                  <TouchableOpacity
+                    style={[
+                      styles.editModalChevronButton,
+                      (isUpdatingResident || !isEditFormValid()) &&
+                        styles.editModalChevronButtonDisabled,
+                    ]}
+                    onPress={handlePreviousPropertyEdit}
+                    disabled={isUpdatingResident || !isEditFormValid()}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons
+                      name="chevron-back"
+                      size={responsiveScale(24)}
+                      color={
+                        isUpdatingResident || !isEditFormValid()
+                          ? COLORS.text.light
+                          : COLORS.primary[500]
+                      }
+                    />
+                  </TouchableOpacity>
+                )}
+                {/* Next Property Chevron - only show if more than 1 property */}
+                {selectedProperty && filteredProperties.length > 1 && (
+                  <TouchableOpacity
+                    style={[
+                      styles.editModalChevronButton,
+                      (isUpdatingResident || !isEditFormValid()) &&
+                        styles.editModalChevronButtonDisabled,
+                    ]}
+                    onPress={handleNextPropertyEdit}
+                    disabled={isUpdatingResident || !isEditFormValid()}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons
+                      name="chevron-forward"
+                      size={responsiveScale(24)}
+                      color={
+                        isUpdatingResident || !isEditFormValid()
+                          ? COLORS.text.light
+                          : COLORS.primary[500]
+                      }
+                    />
+                  </TouchableOpacity>
+                )}
+              </View>
               <TouchableOpacity
                 onPress={handleCloseEditModal}
                 style={styles.propertyModalCloseButton}
@@ -3456,6 +3602,195 @@ export default function TerritoryMapViewScreen() {
                   bounces={false}
                   keyboardShouldPersistTaps="handled"
                 >
+                  {/* Validation Errors */}
+                  {editValidationErrors.length > 0 && (
+                    <View style={styles.editFormErrorContainer}>
+                      <Text style={styles.editFormErrorTitle}>
+                        Please fix the following errors:
+                      </Text>
+                      {editValidationErrors.map((error, index) => (
+                        <Text key={index} style={styles.editFormErrorText}>
+                          • {error}
+                        </Text>
+                      ))}
+                    </View>
+                  )}
+
+                  {/* Validation Status */}
+                  {isEditValidating && (
+                    <View style={styles.editFormValidatingContainer}>
+                      <ActivityIndicator
+                        size="small"
+                        color={COLORS.primary[500]}
+                      />
+                      <Text style={styles.editFormValidatingText}>
+                        Validating location and checking requirements...
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Status & Contact Section */}
+                  <View
+                    style={[
+                      styles.editFormSection,
+                      styles.editFormSectionGreen,
+                    ]}
+                  >
+                    <View style={styles.editFormSectionHeader}>
+                      <View
+                        style={[
+                          styles.editFormSectionHeaderBar,
+                          styles.editFormSectionHeaderBarGreen,
+                        ]}
+                      />
+                      <Text style={styles.editFormSectionTitle}>
+                        Status & Contact
+                      </Text>
+                    </View>
+
+                    <View style={styles.editFormFields}>
+                      {/* Status */}
+                      <View style={styles.editFormField}>
+                        <Text style={styles.editFormLabel}>Status *</Text>
+                        <TouchableOpacity
+                          style={styles.editFormSelect}
+                          onPress={() => setEditStatusDropdownVisible(true)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.editFormSelectText}>
+                            {getStatusDisplayName(editFormData.status)}
+                          </Text>
+                          <Ionicons
+                            name="chevron-down"
+                            size={responsiveScale(16)}
+                            color={COLORS.text.secondary}
+                          />
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Owner Name */}
+                      <View style={styles.editFormField}>
+                        <Text style={styles.editFormLabel}>Owner Name</Text>
+                        <TextInput
+                          style={styles.editFormInputStandalone}
+                          value={editFormData.ownerName}
+                          onChangeText={(value) =>
+                            handleFormChange("ownerName", value)
+                          }
+                          placeholder="Enter owner name"
+                        />
+                      </View>
+
+                      {/* Email */}
+                      <View style={styles.editFormField}>
+                        <Text style={styles.editFormLabel}>Email</Text>
+                        <TextInput
+                          style={styles.editFormInputStandalone}
+                          value={editFormData.email}
+                          onChangeText={(value) =>
+                            handleFormChange("email", value)
+                          }
+                          placeholder="Enter email address"
+                          keyboardType="email-address"
+                          autoCapitalize="none"
+                        />
+                      </View>
+
+                      {/* Phone */}
+                      <View style={styles.editFormField}>
+                        <Text style={styles.editFormLabel}>Phone Number</Text>
+                        <TextInput
+                          style={styles.editFormInputStandalone}
+                          value={editFormData.phone}
+                          onChangeText={(value) =>
+                            handleFormChange("phone", value)
+                          }
+                          placeholder="Enter phone number"
+                          keyboardType="phone-pad"
+                        />
+                      </View>
+
+                      {/* Last Visited */}
+                      <View style={styles.editFormField}>
+                        <Text style={styles.editFormLabel}>
+                          Last Visited{" "}
+                          {editFormData.status !== "not-visited" && (
+                            <Text style={styles.editFormRequired}>*</Text>
+                          )}
+                        </Text>
+                        <View style={styles.editFormInputContainer}>
+                          <TextInput
+                            style={styles.editFormInput}
+                            value={editFormData.lastVisited}
+                            onChangeText={(value) =>
+                              handleFormChange("lastVisited", value)
+                            }
+                            placeholder="YYYY-MM-DD"
+                            editable={false}
+                            onPressIn={() => setShowDatePicker(true)}
+                          />
+                          <TouchableOpacity
+                            style={styles.editFormDatePickerButton}
+                            onPress={() => setShowDatePicker(true)}
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons
+                              name="calendar-outline"
+                              size={responsiveScale(18)}
+                              color={COLORS.text.secondary}
+                            />
+                          </TouchableOpacity>
+                        </View>
+                        {editFormData.status !== "not-visited" &&
+                          !editFormData.lastVisited && (
+                            <Text style={styles.editFormHelperText}>
+                              Required when status is not &quot;Not
+                              Visited&quot;
+                            </Text>
+                          )}
+                        <DateTimePickerModal
+                          isVisible={showDatePicker}
+                          mode="date"
+                          date={
+                            editFormData.lastVisited
+                              ? new Date(editFormData.lastVisited)
+                              : new Date()
+                          }
+                          maximumDate={new Date()}
+                          onConfirm={(selectedDate) => {
+                            const formattedDate = selectedDate
+                              .toISOString()
+                              .split("T")[0];
+                            handleFormChange("lastVisited", formattedDate);
+                            setShowDatePicker(false);
+                          }}
+                          onCancel={() => {
+                            setShowDatePicker(false);
+                          }}
+                        />
+                      </View>
+
+                      {/* Notes */}
+                      <View style={styles.editFormField}>
+                        <Text style={styles.editFormLabel}>Notes</Text>
+                        <TextInput
+                          style={[
+                            styles.editFormInputStandalone,
+                            styles.editFormTextArea,
+                          ]}
+                          value={editFormData.notes}
+                          onChangeText={(value) =>
+                            handleFormChange("notes", value)
+                          }
+                          placeholder="Enter agent notes about the visit/interaction..."
+                          multiline
+                          numberOfLines={3}
+                          textAlignVertical="top"
+                        />
+                      </View>
+                    </View>
+                  </View>
+
                   {/* Basic Information Section */}
                   <View style={styles.editFormSection}>
                     <View style={styles.editFormSectionHeader}>
@@ -3622,273 +3957,6 @@ export default function TerritoryMapViewScreen() {
                             keyboardType="decimal-pad"
                           />
                         </View>
-                      </View>
-                    </View>
-                  </View>
-
-                  {/* Validation Errors */}
-                  {editValidationErrors.length > 0 && (
-                    <View style={styles.editFormErrorContainer}>
-                      <Text style={styles.editFormErrorTitle}>
-                        Please fix the following errors:
-                      </Text>
-                      {editValidationErrors.map((error, index) => (
-                        <Text key={index} style={styles.editFormErrorText}>
-                          • {error}
-                        </Text>
-                      ))}
-                    </View>
-                  )}
-
-                  {/* Validation Status */}
-                  {isEditValidating && (
-                    <View style={styles.editFormValidatingContainer}>
-                      <ActivityIndicator
-                        size="small"
-                        color={COLORS.primary[500]}
-                      />
-                      <Text style={styles.editFormValidatingText}>
-                        Validating location and checking requirements...
-                      </Text>
-                    </View>
-                  )}
-
-                  {/* Status & Tracking Section */}
-                  <View
-                    style={[
-                      styles.editFormSection,
-                      styles.editFormSectionGreen,
-                    ]}
-                  >
-                    <View style={styles.editFormSectionHeader}>
-                      <View
-                        style={[
-                          styles.editFormSectionHeaderBar,
-                          styles.editFormSectionHeaderBarGreen,
-                        ]}
-                      />
-                      <Text style={styles.editFormSectionTitle}>
-                        Status & Tracking
-                      </Text>
-                    </View>
-
-                    <View style={styles.editFormFields}>
-                      {/* Status */}
-                      <View style={styles.editFormField}>
-                        <Text style={styles.editFormLabel}>Status *</Text>
-                        <TouchableOpacity
-                          style={styles.editFormSelect}
-                          onPress={() => setEditStatusDropdownVisible(true)}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={styles.editFormSelectText}>
-                            {getStatusDisplayName(editFormData.status)}
-                          </Text>
-                          <Ionicons
-                            name="chevron-down"
-                            size={responsiveScale(16)}
-                            color={COLORS.text.secondary}
-                          />
-                        </TouchableOpacity>
-                      </View>
-
-                      {/* Last Visited */}
-                      <View style={styles.editFormField}>
-                        <Text style={styles.editFormLabel}>
-                          Last Visited{" "}
-                          {editFormData.status !== "not-visited" && (
-                            <Text style={styles.editFormRequired}>*</Text>
-                          )}
-                        </Text>
-                        <View style={styles.editFormInputContainer}>
-                          <TextInput
-                            style={styles.editFormInput}
-                            value={editFormData.lastVisited}
-                            onChangeText={(value) =>
-                              handleFormChange("lastVisited", value)
-                            }
-                            placeholder="YYYY-MM-DD"
-                            editable={false}
-                            onPressIn={() => setShowDatePicker(true)}
-                          />
-                          <TouchableOpacity
-                            style={styles.editFormDatePickerButton}
-                            onPress={() => setShowDatePicker(true)}
-                            activeOpacity={0.7}
-                          >
-                            <Ionicons
-                              name="calendar-outline"
-                              size={responsiveScale(18)}
-                              color={COLORS.text.secondary}
-                            />
-                          </TouchableOpacity>
-                        </View>
-                        {editFormData.status !== "not-visited" &&
-                          !editFormData.lastVisited && (
-                            <Text style={styles.editFormHelperText}>
-                              Required when status is not &quot;Not
-                              Visited&quot;
-                            </Text>
-                          )}
-                        <DateTimePickerModal
-                          isVisible={showDatePicker}
-                          mode="date"
-                          date={
-                            editFormData.lastVisited
-                              ? new Date(editFormData.lastVisited)
-                              : new Date()
-                          }
-                          maximumDate={new Date()}
-                          onConfirm={(selectedDate) => {
-                            const formattedDate = selectedDate
-                              .toISOString()
-                              .split("T")[0];
-                            handleFormChange("lastVisited", formattedDate);
-                            setShowDatePicker(false);
-                          }}
-                          onCancel={() => {
-                            setShowDatePicker(false);
-                          }}
-                        />
-                      </View>
-
-                      {/* Notes */}
-                      <View style={styles.editFormField}>
-                        <Text style={styles.editFormLabel}>Notes</Text>
-                        <TextInput
-                          style={[
-                            styles.editFormInputStandalone,
-                            styles.editFormTextArea,
-                          ]}
-                          value={editFormData.notes}
-                          onChangeText={(value) =>
-                            handleFormChange("notes", value)
-                          }
-                          placeholder="Enter agent notes about the visit/interaction..."
-                          multiline
-                          numberOfLines={3}
-                          textAlignVertical="top"
-                        />
-                      </View>
-                    </View>
-                  </View>
-
-                  {/* Contact Information Section */}
-                  <View
-                    style={[
-                      styles.editFormSection,
-                      styles.editFormSectionPurple,
-                    ]}
-                  >
-                    <View style={styles.editFormSectionHeader}>
-                      <View
-                        style={[
-                          styles.editFormSectionHeaderBar,
-                          styles.editFormSectionHeaderBarPurple,
-                        ]}
-                      />
-                      <Text style={styles.editFormSectionTitle}>
-                        Contact Information
-                      </Text>
-                    </View>
-
-                    <View style={styles.editFormFields}>
-                      <View style={styles.editFormField}>
-                        <Text style={styles.editFormLabel}>Phone</Text>
-                        <TextInput
-                          style={styles.editFormInputStandalone}
-                          value={editFormData.phone}
-                          onChangeText={(value) =>
-                            handleFormChange("phone", value)
-                          }
-                          placeholder="Enter phone number"
-                          keyboardType="phone-pad"
-                        />
-                      </View>
-                      <View style={styles.editFormField}>
-                        <Text style={styles.editFormLabel}>Email</Text>
-                        <TextInput
-                          style={styles.editFormInputStandalone}
-                          value={editFormData.email}
-                          onChangeText={(value) =>
-                            handleFormChange("email", value)
-                          }
-                          placeholder="Enter email address"
-                          keyboardType="email-address"
-                          autoCapitalize="none"
-                        />
-                      </View>
-                    </View>
-                  </View>
-
-                  {/* Owner Information Section */}
-                  <View
-                    style={[
-                      styles.editFormSection,
-                      styles.editFormSectionOrange,
-                    ]}
-                  >
-                    <View style={styles.editFormSectionHeader}>
-                      <View
-                        style={[
-                          styles.editFormSectionHeaderBar,
-                          styles.editFormSectionHeaderBarOrange,
-                        ]}
-                      />
-                      <Text style={styles.editFormSectionTitle}>
-                        Owner Information
-                      </Text>
-                    </View>
-
-                    <View style={styles.editFormFields}>
-                      <View style={styles.editFormField}>
-                        <Text style={styles.editFormLabel}>Owner Name</Text>
-                        <TextInput
-                          style={styles.editFormInputStandalone}
-                          value={editFormData.ownerName}
-                          onChangeText={(value) =>
-                            handleFormChange("ownerName", value)
-                          }
-                          placeholder="Enter owner name"
-                        />
-                      </View>
-                      <View style={styles.editFormField}>
-                        <Text style={styles.editFormLabel}>Owner Phone</Text>
-                        <TextInput
-                          style={styles.editFormInputStandalone}
-                          value={editFormData.ownerPhone}
-                          onChangeText={(value) =>
-                            handleFormChange("ownerPhone", value)
-                          }
-                          placeholder="Enter owner phone"
-                          keyboardType="phone-pad"
-                        />
-                      </View>
-                      <View style={styles.editFormField}>
-                        <Text style={styles.editFormLabel}>Owner Email</Text>
-                        <TextInput
-                          style={styles.editFormInputStandalone}
-                          value={editFormData.ownerEmail}
-                          onChangeText={(value) =>
-                            handleFormChange("ownerEmail", value)
-                          }
-                          placeholder="Enter owner email"
-                          keyboardType="email-address"
-                          autoCapitalize="none"
-                        />
-                      </View>
-                      <View style={styles.editFormField}>
-                        <Text style={styles.editFormLabel}>
-                          Owner Mailing Address
-                        </Text>
-                        <TextInput
-                          style={styles.editFormInputStandalone}
-                          value={editFormData.ownerMailingAddress}
-                          onChangeText={(value) =>
-                            handleFormChange("ownerMailingAddress", value)
-                          }
-                          placeholder="Enter owner mailing address"
-                        />
                       </View>
                     </View>
                   </View>
@@ -5135,10 +5203,24 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.border.light,
     flexShrink: 0,
   },
+  editModalHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: responsiveSpacing(SPACING.md),
+    flex: 1,
+  },
   editModalTitle: {
     fontSize: responsiveScale(20),
     fontWeight: "600",
     color: COLORS.text.primary,
+  },
+  editModalChevronButton: {
+    padding: responsiveSpacing(SPACING.xs),
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  editModalChevronButtonDisabled: {
+    opacity: 0.3,
   },
   editModalLoading: {
     flex: 1,

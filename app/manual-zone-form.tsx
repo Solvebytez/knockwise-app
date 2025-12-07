@@ -11,6 +11,7 @@ import {
   TextInput,
   Text,
   Dimensions,
+  Linking,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -28,7 +29,10 @@ import { Button } from "@/components/ui";
 import { AppHeader } from "@/components/ui";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { Ionicons } from "@expo/vector-icons";
-import ManualZoneModal, { ManualEntryMode, type LastPropertyInfo } from "@/components/ManualZoneModal";
+import ManualZoneModal, {
+  ManualEntryMode,
+  type LastPropertyInfo,
+} from "@/components/ManualZoneModal";
 import ManualZoneDetailsModal, {
   type ManualZoneContext,
 } from "@/components/ManualZoneDetailsModal";
@@ -78,7 +82,9 @@ export default function ManualZoneFormScreen() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const params = useLocalSearchParams();
-  const [zoneContext, setZoneContext] = useState<ManualZoneContext | null>(null);
+  const [zoneContext, setZoneContext] = useState<ManualZoneContext | null>(
+    null
+  );
   const [isDetailsModalVisible, setIsDetailsModalVisible] = useState(false);
   const [isPropertyModalVisible, setIsPropertyModalVisible] = useState(false);
   const [selectedMode, setSelectedMode] =
@@ -86,18 +92,24 @@ export default function ManualZoneFormScreen() {
 
   // Property details modal states
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-  const [selectedPropertyForDetails, setSelectedPropertyForDetails] = useState<Property | null>(null);
+  const [selectedPropertyForDetails, setSelectedPropertyForDetails] =
+    useState<Property | null>(null);
 
   // Edit property modal states
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editPropertyId, setEditPropertyId] = useState<string | null>(null);
-  const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
+  const [selectedProperty, setSelectedProperty] = useState<Property | null>(
+    null
+  );
   const [isUpdatingResident, setIsUpdatingResident] = useState(false);
   const [isEditValidating, setIsEditValidating] = useState(false);
-  const [editValidationErrors, setEditValidationErrors] = useState<string[]>([]);
+  const [editValidationErrors, setEditValidationErrors] = useState<string[]>(
+    []
+  );
   const [isEditGettingLocation, setIsEditGettingLocation] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [editStatusDropdownVisible, setEditStatusDropdownVisible] = useState(false);
+  const [editStatusDropdownVisible, setEditStatusDropdownVisible] =
+    useState(false);
 
   // Address autocomplete states
   const [addressSuggestions, setAddressSuggestions] = useState<any[]>([]);
@@ -143,9 +155,15 @@ export default function ManualZoneFormScreen() {
     queryKey: ["zoneDetails", editZoneId],
     queryFn: async () => {
       if (!editZoneId) return null;
-      console.log("📝 [ManualZoneFormScreen] Fetching zone details for:", editZoneId);
+      console.log(
+        "📝 [ManualZoneFormScreen] Fetching zone details for:",
+        editZoneId
+      );
       const response = await apiInstance.get(`/agent-zones/${editZoneId}`);
-      console.log("📝 [ManualZoneFormScreen] Zone details fetched:", response.data);
+      console.log(
+        "📝 [ManualZoneFormScreen] Zone details fetched:",
+        response.data
+      );
       return response.data;
     },
     enabled: isEditMode,
@@ -184,19 +202,34 @@ export default function ManualZoneFormScreen() {
       const zone = zoneDetailsData.data;
       console.log("📝 [ManualZoneFormScreen] Raw zone data:", zone);
       console.log("📝 [ManualZoneFormScreen] Zone areaId:", zone.areaId);
-      console.log("📝 [ManualZoneFormScreen] Zone municipalityId:", zone.municipalityId);
-      console.log("📝 [ManualZoneFormScreen] Zone communityId:", zone.communityId);
-      
+      console.log(
+        "📝 [ManualZoneFormScreen] Zone municipalityId:",
+        zone.municipalityId
+      );
+      console.log(
+        "📝 [ManualZoneFormScreen] Zone communityId:",
+        zone.communityId
+      );
+
       const mappedContext = {
         zoneId: zone._id,
         zoneName: zone.name,
         zoneDescription: zone.description || "",
-        area: zone.areaId ? { id: zone.areaId._id, name: zone.areaId.name } : undefined,
-        municipality: zone.municipalityId ? { id: zone.municipalityId._id, name: zone.municipalityId.name } : undefined,
-        community: zone.communityId ? { id: zone.communityId._id, name: zone.communityId.name } : undefined,
+        area: zone.areaId
+          ? { id: zone.areaId._id, name: zone.areaId.name }
+          : undefined,
+        municipality: zone.municipalityId
+          ? { id: zone.municipalityId._id, name: zone.municipalityId.name }
+          : undefined,
+        community: zone.communityId
+          ? { id: zone.communityId._id, name: zone.communityId.name }
+          : undefined,
       };
-      
-      console.log("📝 [ManualZoneFormScreen] Mapped zone context:", mappedContext);
+
+      console.log(
+        "📝 [ManualZoneFormScreen] Mapped zone context:",
+        mappedContext
+      );
       setZoneContext(mappedContext);
     }
   }, [isEditMode, zoneDetailsData]);
@@ -262,8 +295,13 @@ export default function ManualZoneFormScreen() {
       queryKey: ["propertyDetails", selectedPropertyForDetails?._id],
       queryFn: async () => {
         if (!selectedPropertyForDetails?._id) return null;
-        console.log("📡 Fetching property details (cached if available):", selectedPropertyForDetails._id);
-        const response = await apiInstance.get(`/residents/${selectedPropertyForDetails._id}`);
+        console.log(
+          "📡 Fetching property details (cached if available):",
+          selectedPropertyForDetails._id
+        );
+        const response = await apiInstance.get(
+          `/residents/${selectedPropertyForDetails._id}`
+        );
         console.log("✅ Property details fetched:", response.data.data);
         return response.data.data;
       },
@@ -314,8 +352,13 @@ export default function ManualZoneFormScreen() {
       }
 
       // Last Visited is required when status is not "not-visited"
-      if (editFormData.status !== "not-visited" && !editFormData.lastVisited.trim()) {
-        errors.push("Last visited date is required when status is not 'Not Visited'");
+      if (
+        editFormData.status !== "not-visited" &&
+        !editFormData.lastVisited.trim()
+      ) {
+        errors.push(
+          "Last visited date is required when status is not 'Not Visited'"
+        );
       }
 
       setEditValidationErrors(errors);
@@ -337,20 +380,30 @@ export default function ManualZoneFormScreen() {
         ...prev,
         lastVisited: (() => {
           const detailedDate = editPropertyDetails?.resident?.lastVisited
-            ? new Date(editPropertyDetails.resident.lastVisited).toISOString().split("T")[0]
+            ? new Date(editPropertyDetails.resident.lastVisited)
+                .toISOString()
+                .split("T")[0]
             : "";
           const propertyDate = selectedProperty.lastVisited
             ? new Date(selectedProperty.lastVisited).toISOString().split("T")[0]
             : "";
           return detailedDate || propertyDate || prev.lastVisited;
         })(),
-        notes: editPropertyDetails?.resident?.notes || selectedProperty.notes || prev.notes,
+        notes:
+          editPropertyDetails?.resident?.notes ||
+          selectedProperty.notes ||
+          prev.notes,
         phone: editPropertyDetails?.resident?.phone || prev.phone,
         email: editPropertyDetails?.resident?.email || prev.email,
-        ownerName: editPropertyDetails?.propertyData?.ownerName || prev.ownerName,
-        ownerPhone: editPropertyDetails?.propertyData?.ownerPhone || prev.ownerPhone,
-        ownerEmail: editPropertyDetails?.propertyData?.ownerEmail || prev.ownerEmail,
-        ownerMailingAddress: editPropertyDetails?.propertyData?.ownerMailingAddress || prev.ownerMailingAddress,
+        ownerName:
+          editPropertyDetails?.propertyData?.ownerName || prev.ownerName,
+        ownerPhone:
+          editPropertyDetails?.propertyData?.ownerPhone || prev.ownerPhone,
+        ownerEmail:
+          editPropertyDetails?.propertyData?.ownerEmail || prev.ownerEmail,
+        ownerMailingAddress:
+          editPropertyDetails?.propertyData?.ownerMailingAddress ||
+          prev.ownerMailingAddress,
       }));
     }
   }, [editPropertyDetails, selectedProperty]);
@@ -503,7 +556,8 @@ export default function ManualZoneFormScreen() {
 
     const statusValid =
       editFormData.status === "not-visited" ||
-      (editFormData.status !== "not-visited" && editFormData.lastVisited.trim() !== "");
+      (editFormData.status !== "not-visited" &&
+        editFormData.lastVisited.trim() !== "");
 
     return basicInfoValid && statusValid;
   };
@@ -576,11 +630,14 @@ export default function ManualZoneFormScreen() {
       let errorMessage = "Failed to update property. Please try again.";
 
       if (error.response?.status === 403) {
-        errorMessage = "Permission denied. You may not have permission to update this property.";
+        errorMessage =
+          "Permission denied. You may not have permission to update this property.";
       } else if (error.response?.status === 401) {
         errorMessage = "Your session has expired. Please log in again.";
       } else if (error.response?.status === 400) {
-        errorMessage = error.response?.data?.message || "Invalid data. Please check your input.";
+        errorMessage =
+          error.response?.data?.message ||
+          "Invalid data. Please check your input.";
       } else if (error.response?.status >= 500) {
         errorMessage = "Server error. Please try again later.";
       } else if (!error.response) {
@@ -595,26 +652,83 @@ export default function ManualZoneFormScreen() {
     }
   };
 
-  // Handle next property in edit modal
-  const handleNextPropertyEdit = async () => {
+  // Helper function to navigate to a specific property index
+  const navigateToProperty = async (targetProperty: Property) => {
+    // First, save current property if there are changes
+    if (selectedProperty) {
+      const hasChanges =
+        editFormData.address !== selectedProperty.address ||
+        editFormData.houseNumber !==
+          (selectedProperty.houseNumber?.toString() || "") ||
+        editFormData.status !== selectedProperty.status ||
+        editFormData.notes !== (selectedProperty.notes || "") ||
+        editFormData.lastVisited !==
+          (selectedProperty.lastVisited
+            ? new Date(selectedProperty.lastVisited).toISOString().split("T")[0]
+            : "");
+
+      if (hasChanges && isEditFormValid()) {
+        // Save current property first (keep modal open)
+        await handleUpdateResident(true);
+        // Wait a bit for the save to complete
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+
+    // Update to target property
+    setSelectedProperty(targetProperty);
+    setEditPropertyId(targetProperty._id);
+
+    // Get today's date in YYYY-MM-DD format
+    const today = new Date().toISOString().split("T")[0];
+
+    // Initialize form data with target property values
+    setEditFormData({
+      address: targetProperty.address,
+      houseNumber: targetProperty.houseNumber?.toString() || "",
+      longitude: targetProperty.coordinates[0]?.toString() || "",
+      latitude: targetProperty.coordinates[1]?.toString() || "",
+      status: targetProperty.status,
+      lastVisited: targetProperty.lastVisited
+        ? new Date(targetProperty.lastVisited).toISOString().split("T")[0]
+        : today,
+      notes: targetProperty.notes || "",
+      phone: "",
+      email: "",
+      ownerName: "",
+      ownerPhone: "",
+      ownerEmail: "",
+      ownerMailingAddress: "",
+    });
+
+    // Invalidate queries to refresh property details
+    void queryClient.invalidateQueries({
+      queryKey: ["propertyDetails", targetProperty._id],
+    });
+  };
+
+  // Handle previous property in edit modal (wrap around)
+  const handlePreviousPropertyEdit = async () => {
     if (!selectedProperty || filteredProperties.length <= 1) return;
 
-    // First, save current property if there are changes
-    const hasChanges = 
-      editFormData.address !== selectedProperty.address ||
-      editFormData.houseNumber !== (selectedProperty.houseNumber?.toString() || "") ||
-      editFormData.status !== selectedProperty.status ||
-      editFormData.notes !== (selectedProperty.notes || "") ||
-      editFormData.lastVisited !== (selectedProperty.lastVisited 
-        ? new Date(selectedProperty.lastVisited).toISOString().split("T")[0]
-        : "");
+    // Find current property index
+    const currentIndex = filteredProperties.findIndex(
+      (p) => p._id === selectedProperty._id
+    );
 
-    if (hasChanges && isEditFormValid()) {
-      // Save current property first (keep modal open)
-      await handleUpdateResident(true);
-      // Wait a bit for the save to complete
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
+    if (currentIndex === -1) return;
+
+    // Get previous property (wrap around to last if at first)
+    const previousIndex =
+      currentIndex === 0 ? filteredProperties.length - 1 : currentIndex - 1;
+    const previousProperty = filteredProperties[previousIndex];
+
+    await navigateToProperty(previousProperty);
+  };
+
+  // Handle next property in edit modal (wrap around)
+  const handleNextPropertyEdit = async () => {
+    if (!selectedProperty || filteredProperties.length <= 1) return;
 
     // Find current property index
     const currentIndex = filteredProperties.findIndex(
@@ -627,33 +741,7 @@ export default function ManualZoneFormScreen() {
     const nextIndex = (currentIndex + 1) % filteredProperties.length;
     const nextProperty = filteredProperties[nextIndex];
 
-    // Update to next property
-    setSelectedProperty(nextProperty);
-    setEditPropertyId(nextProperty._id);
-
-    // Initialize form data with next property values
-    setEditFormData({
-      address: nextProperty.address,
-      houseNumber: nextProperty.houseNumber?.toString() || "",
-      longitude: nextProperty.coordinates[0]?.toString() || "",
-      latitude: nextProperty.coordinates[1]?.toString() || "",
-      status: nextProperty.status,
-      lastVisited: nextProperty.lastVisited
-        ? new Date(nextProperty.lastVisited).toISOString().split("T")[0]
-        : "",
-      notes: nextProperty.notes || "",
-      phone: "",
-      email: "",
-      ownerName: "",
-      ownerPhone: "",
-      ownerEmail: "",
-      ownerMailingAddress: "",
-    });
-
-    // Invalidate queries to refresh property details
-    void queryClient.invalidateQueries({
-      queryKey: ["propertyDetails", nextProperty._id],
-    });
+    await navigateToProperty(nextProperty);
   };
 
   // Show loading state while fetching zone in edit mode
@@ -706,9 +794,15 @@ export default function ManualZoneFormScreen() {
         <View style={styles.content}>
           <View style={styles.headerSection}>
             <H3 style={styles.title} align="center">
-              {isEditMode ? "Edit Zone & Add Properties" : "Select Property Type"}
+              {isEditMode
+                ? "Edit Zone & Add Properties"
+                : "Select Property Type"}
             </H3>
-            <Body2 color={COLORS.text.secondary} style={styles.description} align="center">
+            <Body2
+              color={COLORS.text.secondary}
+              style={styles.description}
+              align="center"
+            >
               {isEditMode
                 ? "Continue adding properties or edit zone details"
                 : "Choose how you want to organize properties in your zone"}
@@ -760,7 +854,11 @@ export default function ManualZoneFormScreen() {
                 <MaterialIcons
                   name="format-list-numbered"
                   size={responsiveScale(18)}
-                  color={selectedMode === "sequential" ? COLORS.white : COLORS.primary[500]}
+                  color={
+                    selectedMode === "sequential"
+                      ? COLORS.white
+                      : COLORS.primary[500]
+                  }
                 />
               }
               onPress={() => handleModeSelect("sequential")}
@@ -776,7 +874,9 @@ export default function ManualZoneFormScreen() {
                 <MaterialIcons
                   name="looks-two"
                   size={responsiveScale(18)}
-                  color={selectedMode === "even" ? COLORS.white : COLORS.primary[500]}
+                  color={
+                    selectedMode === "even" ? COLORS.white : COLORS.primary[500]
+                  }
                 />
               }
               onPress={() => handleModeSelect("even")}
@@ -792,7 +892,9 @@ export default function ManualZoneFormScreen() {
                 <MaterialIcons
                   name="looks-one"
                   size={responsiveScale(18)}
-                  color={selectedMode === "odd" ? COLORS.white : COLORS.primary[500]}
+                  color={
+                    selectedMode === "odd" ? COLORS.white : COLORS.primary[500]
+                  }
                 />
               }
               onPress={() => handleModeSelect("odd")}
@@ -825,17 +927,19 @@ export default function ManualZoneFormScreen() {
           {zoneContext && (
             <View style={styles.propertiesSection}>
               <H3 style={styles.propertiesTitle}>
-                {selectedMode === "sequential" 
+                {selectedMode === "sequential"
                   ? `All Properties (${filteredProperties.length})`
                   : selectedMode === "odd"
                   ? `Odd Properties (${filteredProperties.length})`
-                  : `Even Properties (${filteredProperties.length})`
-                }
+                  : `Even Properties (${filteredProperties.length})`}
               </H3>
               {isLoadingProperties ? (
                 <View style={styles.loadingContainer}>
                   <ActivityIndicator size="small" color={COLORS.primary[500]} />
-                  <Body3 color={COLORS.text.secondary} style={styles.loadingText}>
+                  <Body3
+                    color={COLORS.text.secondary}
+                    style={styles.loadingText}
+                  >
                     Loading properties...
                   </Body3>
                 </View>
@@ -844,8 +948,9 @@ export default function ManualZoneFormScreen() {
                   <Body2 color={COLORS.text.secondary} align="center">
                     {properties.length === 0
                       ? "No properties added yet. Use the buttons above to add properties."
-                      : `No ${selectedMode === "odd" ? "odd" : "even"} house numbers found.`
-                    }
+                      : `No ${
+                          selectedMode === "odd" ? "odd" : "even"
+                        } house numbers found.`}
                   </Body2>
                 </View>
               ) : (
@@ -873,7 +978,10 @@ export default function ManualZoneFormScreen() {
                               <View
                                 style={[
                                   styles.statusBadge,
-                                  { backgroundColor: statusColors[property.status] + "20" },
+                                  {
+                                    backgroundColor:
+                                      statusColors[property.status] + "20",
+                                  },
                                 ]}
                               >
                                 <Text
@@ -930,13 +1038,27 @@ export default function ManualZoneFormScreen() {
       <ManualZoneDetailsModal
         visible={isDetailsModalVisible}
         initialValue={(() => {
-          const value = zoneContext ? {
+          if (!zoneContext) return undefined;
+
+          const zoneId = zoneContext.zoneId || editZoneId;
+          if (!zoneId) return undefined;
+
+          const value: ManualZoneContext = {
             ...zoneContext,
-            zoneId: zoneContext.zoneId || editZoneId || undefined,
-          } : undefined;
-          console.log("📝 [ManualZoneFormScreen] Passing to modal - zoneContext:", zoneContext);
-          console.log("📝 [ManualZoneFormScreen] Passing to modal - editZoneId:", editZoneId);
-          console.log("📝 [ManualZoneFormScreen] Passing to modal - initialValue:", value);
+            zoneId,
+          };
+          console.log(
+            "📝 [ManualZoneFormScreen] Passing to modal - zoneContext:",
+            zoneContext
+          );
+          console.log(
+            "📝 [ManualZoneFormScreen] Passing to modal - editZoneId:",
+            editZoneId
+          );
+          console.log(
+            "📝 [ManualZoneFormScreen] Passing to modal - initialValue:",
+            value
+          );
           return value;
         })()}
         onSave={handleZoneSaved}
@@ -966,32 +1088,55 @@ export default function ManualZoneFormScreen() {
         animationType="slide"
         onRequestClose={() => {}}
       >
-        <Pressable
-          style={styles.editModalOverlay}
-          onPress={() => {}}
-        >
+        <Pressable style={styles.editModalOverlay} onPress={() => {}}>
           <View style={styles.editModalContent}>
             {/* Modal Header */}
             <View style={styles.editModalHeader}>
               <View style={styles.editModalHeaderLeft}>
                 <Text style={styles.editModalTitle}>Edit Property</Text>
-                {/* Next Property Button - only show if more than 1 property */}
+                {/* Previous Property Chevron - only show if more than 1 property */}
                 {selectedProperty && filteredProperties.length > 1 && (
                   <TouchableOpacity
                     style={[
-                      styles.editModalNextButtonHeader,
+                      styles.editModalChevronButton,
                       (isUpdatingResident || !isEditFormValid()) &&
-                        styles.editModalNextButtonHeaderDisabled,
+                        styles.editModalChevronButtonDisabled,
+                    ]}
+                    onPress={handlePreviousPropertyEdit}
+                    disabled={isUpdatingResident || !isEditFormValid()}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons
+                      name="chevron-back"
+                      size={responsiveScale(24)}
+                      color={
+                        isUpdatingResident || !isEditFormValid()
+                          ? COLORS.text.light
+                          : COLORS.primary[500]
+                      }
+                    />
+                  </TouchableOpacity>
+                )}
+                {/* Next Property Chevron - only show if more than 1 property */}
+                {selectedProperty && filteredProperties.length > 1 && (
+                  <TouchableOpacity
+                    style={[
+                      styles.editModalChevronButton,
+                      (isUpdatingResident || !isEditFormValid()) &&
+                        styles.editModalChevronButtonDisabled,
                     ]}
                     onPress={handleNextPropertyEdit}
                     disabled={isUpdatingResident || !isEditFormValid()}
                     activeOpacity={0.7}
                   >
-                    <Text style={styles.editModalNextButtonHeaderText}>Next Property</Text>
                     <Ionicons
                       name="chevron-forward"
-                      size={responsiveScale(18)}
-                      color={COLORS.white}
+                      size={responsiveScale(24)}
+                      color={
+                        isUpdatingResident || !isEditFormValid()
+                          ? COLORS.text.light
+                          : COLORS.primary[500]
+                      }
                     />
                   </TouchableOpacity>
                 )}
@@ -1026,169 +1171,6 @@ export default function ManualZoneFormScreen() {
                   bounces={false}
                   keyboardShouldPersistTaps="handled"
                 >
-                  {/* Basic Information Section */}
-                  <View style={styles.editFormSection}>
-                    <View style={styles.editFormSectionHeader}>
-                      <View style={styles.editFormSectionHeaderBar} />
-                      <Text style={styles.editFormSectionTitle}>
-                        Basic Information
-                      </Text>
-                    </View>
-
-                    <View style={styles.editFormFields}>
-                      {/* Address */}
-                      <View style={styles.editFormField}>
-                        <Text style={styles.editFormLabel}>Address</Text>
-                        <TextInput
-                          style={styles.editFormInputStandalone}
-                          value={editFormData.address}
-                          onChangeText={(value) => handleFormChange("address", value)}
-                          placeholder="Enter full property address"
-                          editable={!isUpdatingResident}
-                        />
-                      </View>
-
-                      {/* House Number and Location */}
-                      <View style={styles.editFormRow}>
-                        <View style={[styles.editFormField, { flex: 1 }]}>
-                          <Text style={styles.editFormLabel}>House Number</Text>
-                          <TextInput
-                            style={styles.editFormInputStandalone}
-                            value={editFormData.houseNumber}
-                            onChangeText={(value) => handleFormChange("houseNumber", value)}
-                            placeholder="Enter house number"
-                            keyboardType="numeric"
-                            editable={!isUpdatingResident}
-                          />
-                        </View>
-                        <View style={[styles.editFormField, { flex: 1 }]}>
-                          <Text style={styles.editFormLabel}>Location</Text>
-                          <TouchableOpacity
-                            style={styles.editFormLocationButton}
-                            onPress={async () => {
-                              try {
-                                setIsEditGettingLocation(true);
-                                const { status } = await Location.requestForegroundPermissionsAsync();
-                                if (status !== "granted") {
-                                  Alert.alert("Permission Denied", "Location permission is required.");
-                                  setIsEditGettingLocation(false);
-                                  return;
-                                }
-                                const location = await Location.getCurrentPositionAsync({
-                                  accuracy: Location.Accuracy.High,
-                                });
-                                
-                                const lat = location.coords.latitude;
-                                const lng = location.coords.longitude;
-
-                                setEditFormData((prev) => ({
-                                  ...prev,
-                                  latitude: lat.toString(),
-                                  longitude: lng.toString(),
-                                }));
-
-                                try {
-                                  const geocodeResult = await Location.reverseGeocodeAsync({
-                                    latitude: lat,
-                                    longitude: lng,
-                                  });
-
-                                  if (geocodeResult && geocodeResult.length > 0) {
-                                    const address = geocodeResult[0];
-                                    const addr = address as any;
-                                    const formattedAddress = [
-                                      addr.streetNumber,
-                                      addr.street,
-                                      addr.city,
-                                      addr.region,
-                                      addr.postalCode,
-                                      addr.country,
-                                    ]
-                                      .filter(Boolean)
-                                      .join(", ");
-
-                                    const houseNumber =
-                                      addr.streetNumber || formattedAddress.match(/^(\d+)/)?.[1] || "";
-
-                                    setEditFormData((prev) => ({
-                                      ...prev,
-                                      address: formattedAddress || prev.address,
-                                      houseNumber: houseNumber || prev.houseNumber,
-                                    }));
-
-                                    Alert.alert(
-                                      "Location Captured",
-                                      `Address: ${formattedAddress || `${lat.toFixed(6)}, ${lng.toFixed(6)}`}`
-                                    );
-                                  } else {
-                                    Alert.alert(
-                                      "Location Captured",
-                                      `Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}`
-                                    );
-                                  }
-                                } catch (geocodeError) {
-                                  console.error("Error reverse geocoding:", geocodeError);
-                                  Alert.alert(
-                                    "Location Captured",
-                                    `Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}`
-                                  );
-                                }
-                              } catch (error: any) {
-                                Alert.alert("Error", error.message || "Failed to get location");
-                              } finally {
-                                setIsEditGettingLocation(false);
-                              }
-                            }}
-                            disabled={isUpdatingResident || isEditGettingLocation}
-                            activeOpacity={0.7}
-                          >
-                            {isEditGettingLocation ? (
-                              <ActivityIndicator
-                                size="small"
-                                color={COLORS.primary[500]}
-                              />
-                            ) : (
-                              <Ionicons
-                                name="location-outline"
-                                size={responsiveScale(16)}
-                                color={COLORS.primary[500]}
-                              />
-                            )}
-                            <Text style={styles.editFormLocationButtonText}>
-                              {isEditGettingLocation ? "Getting..." : "Use My Location"}
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-
-                      {/* Longitude and Latitude */}
-                      <View style={styles.editFormRow}>
-                        <View style={[styles.editFormField, { flex: 1 }]}>
-                          <Text style={styles.editFormLabel}>Longitude</Text>
-                          <TextInput
-                            style={styles.editFormInputStandalone}
-                            value={editFormData.longitude}
-                            onChangeText={(value) => handleFormChange("longitude", value)}
-                            placeholder="Enter longitude"
-                            keyboardType="decimal-pad"
-                            editable={!isUpdatingResident}
-                          />
-                        </View>
-                        <View style={[styles.editFormField, { flex: 1 }]}>
-                          <Text style={styles.editFormLabel}>Latitude</Text>
-                          <TextInput
-                            style={styles.editFormInputStandalone}
-                            value={editFormData.latitude}
-                            onChangeText={(value) => handleFormChange("latitude", value)}
-                            placeholder="Enter latitude"
-                            keyboardType="decimal-pad"
-                            editable={!isUpdatingResident}
-                          />
-                        </View>
-                      </View>
-                    </View>
-                  </View>
-
                   {/* Validation Errors */}
                   {editValidationErrors.length > 0 && (
                     <View style={styles.editFormErrorContainer}>
@@ -1216,8 +1198,13 @@ export default function ManualZoneFormScreen() {
                     </View>
                   )}
 
-                  {/* Status & Tracking Section */}
-                  <View style={[styles.editFormSection, styles.editFormSectionGreen]}>
+                  {/* Status & Contact Section */}
+                  <View
+                    style={[
+                      styles.editFormSection,
+                      styles.editFormSectionGreen,
+                    ]}
+                  >
                     <View style={styles.editFormSectionHeader}>
                       <View
                         style={[
@@ -1225,7 +1212,9 @@ export default function ManualZoneFormScreen() {
                           styles.editFormSectionHeaderBarGreen,
                         ]}
                       />
-                      <Text style={styles.editFormSectionTitle}>Status & Tracking</Text>
+                      <Text style={styles.editFormSectionTitle}>
+                        Status & Contact
+                      </Text>
                     </View>
 
                     <View style={styles.editFormFields}>
@@ -1248,6 +1237,51 @@ export default function ManualZoneFormScreen() {
                         </TouchableOpacity>
                       </View>
 
+                      {/* Owner Name */}
+                      <View style={styles.editFormField}>
+                        <Text style={styles.editFormLabel}>Owner Name</Text>
+                        <TextInput
+                          style={styles.editFormInputStandalone}
+                          value={editFormData.ownerName}
+                          onChangeText={(value) =>
+                            handleFormChange("ownerName", value)
+                          }
+                          placeholder="Enter owner name"
+                          editable={!isUpdatingResident}
+                        />
+                      </View>
+
+                      {/* Email */}
+                      <View style={styles.editFormField}>
+                        <Text style={styles.editFormLabel}>Email</Text>
+                        <TextInput
+                          style={styles.editFormInputStandalone}
+                          value={editFormData.email}
+                          onChangeText={(value) =>
+                            handleFormChange("email", value)
+                          }
+                          placeholder="Enter email address"
+                          keyboardType="email-address"
+                          autoCapitalize="none"
+                          editable={!isUpdatingResident}
+                        />
+                      </View>
+
+                      {/* Phone */}
+                      <View style={styles.editFormField}>
+                        <Text style={styles.editFormLabel}>Phone Number</Text>
+                        <TextInput
+                          style={styles.editFormInputStandalone}
+                          value={editFormData.phone}
+                          onChangeText={(value) =>
+                            handleFormChange("phone", value)
+                          }
+                          placeholder="Enter phone number"
+                          keyboardType="phone-pad"
+                          editable={!isUpdatingResident}
+                        />
+                      </View>
+
                       {/* Last Visited */}
                       <View style={styles.editFormField}>
                         <Text style={styles.editFormLabel}>
@@ -1260,7 +1294,9 @@ export default function ManualZoneFormScreen() {
                           <TextInput
                             style={styles.editFormInput}
                             value={editFormData.lastVisited}
-                            onChangeText={(value) => handleFormChange("lastVisited", value)}
+                            onChangeText={(value) =>
+                              handleFormChange("lastVisited", value)
+                            }
                             placeholder="YYYY-MM-DD"
                             editable={false}
                             onPressIn={() => setShowDatePicker(true)}
@@ -1287,7 +1323,9 @@ export default function ManualZoneFormScreen() {
                           }
                           maximumDate={new Date()}
                           onConfirm={(selectedDate) => {
-                            const formattedDate = selectedDate.toISOString().split("T")[0];
+                            const formattedDate = selectedDate
+                              .toISOString()
+                              .split("T")[0];
                             handleFormChange("lastVisited", formattedDate);
                             setShowDatePicker(false);
                           }}
@@ -1299,9 +1337,14 @@ export default function ManualZoneFormScreen() {
                       <View style={styles.editFormField}>
                         <Text style={styles.editFormLabel}>Notes</Text>
                         <TextInput
-                          style={[styles.editFormInputStandalone, styles.editFormTextArea]}
+                          style={[
+                            styles.editFormInputStandalone,
+                            styles.editFormTextArea,
+                          ]}
                           value={editFormData.notes}
-                          onChangeText={(value) => handleFormChange("notes", value)}
+                          onChangeText={(value) =>
+                            handleFormChange("notes", value)
+                          }
                           placeholder="Enter agent notes about the visit/interaction..."
                           multiline
                           numberOfLines={3}
@@ -1312,100 +1355,202 @@ export default function ManualZoneFormScreen() {
                     </View>
                   </View>
 
-                  {/* Contact Information Section */}
-                  <View style={[styles.editFormSection, styles.editFormSectionPurple]}>
+                  {/* Basic Information Section */}
+                  <View style={styles.editFormSection}>
                     <View style={styles.editFormSectionHeader}>
-                      <View
-                        style={[
-                          styles.editFormSectionHeaderBar,
-                          styles.editFormSectionHeaderBarPurple,
-                        ]}
-                      />
-                      <Text style={styles.editFormSectionTitle}>Contact Information</Text>
+                      <View style={styles.editFormSectionHeaderBar} />
+                      <Text style={styles.editFormSectionTitle}>
+                        Basic Information
+                      </Text>
                     </View>
 
                     <View style={styles.editFormFields}>
+                      {/* Address */}
                       <View style={styles.editFormField}>
-                        <Text style={styles.editFormLabel}>Phone</Text>
+                        <Text style={styles.editFormLabel}>Address</Text>
                         <TextInput
                           style={styles.editFormInputStandalone}
-                          value={editFormData.phone}
-                          onChangeText={(value) => handleFormChange("phone", value)}
-                          placeholder="Enter phone number"
-                          keyboardType="phone-pad"
+                          value={editFormData.address}
+                          onChangeText={(value) =>
+                            handleFormChange("address", value)
+                          }
+                          placeholder="Enter full property address"
                           editable={!isUpdatingResident}
                         />
                       </View>
-                      <View style={styles.editFormField}>
-                        <Text style={styles.editFormLabel}>Email</Text>
-                        <TextInput
-                          style={styles.editFormInputStandalone}
-                          value={editFormData.email}
-                          onChangeText={(value) => handleFormChange("email", value)}
-                          placeholder="Enter email address"
-                          keyboardType="email-address"
-                          autoCapitalize="none"
-                          editable={!isUpdatingResident}
-                        />
-                      </View>
-                    </View>
-                  </View>
 
-                  {/* Owner Information Section */}
-                  <View style={[styles.editFormSection, styles.editFormSectionOrange]}>
-                    <View style={styles.editFormSectionHeader}>
-                      <View
-                        style={[
-                          styles.editFormSectionHeaderBar,
-                          styles.editFormSectionHeaderBarOrange,
-                        ]}
-                      />
-                      <Text style={styles.editFormSectionTitle}>Owner Information</Text>
-                    </View>
+                      {/* House Number and Location */}
+                      <View style={styles.editFormRow}>
+                        <View style={[styles.editFormField, { flex: 1 }]}>
+                          <Text style={styles.editFormLabel}>House Number</Text>
+                          <TextInput
+                            style={styles.editFormInputStandalone}
+                            value={editFormData.houseNumber}
+                            onChangeText={(value) =>
+                              handleFormChange("houseNumber", value)
+                            }
+                            placeholder="Enter house number"
+                            keyboardType="numeric"
+                            editable={!isUpdatingResident}
+                          />
+                        </View>
+                        <View style={[styles.editFormField, { flex: 1 }]}>
+                          <Text style={styles.editFormLabel}>Location</Text>
+                          <TouchableOpacity
+                            style={styles.editFormLocationButton}
+                            onPress={async () => {
+                              try {
+                                setIsEditGettingLocation(true);
+                                const { status } =
+                                  await Location.requestForegroundPermissionsAsync();
+                                if (status !== "granted") {
+                                  Alert.alert(
+                                    "Permission Denied",
+                                    "Location permission is required."
+                                  );
+                                  setIsEditGettingLocation(false);
+                                  return;
+                                }
+                                const location =
+                                  await Location.getCurrentPositionAsync({
+                                    accuracy: Location.Accuracy.High,
+                                  });
 
-                    <View style={styles.editFormFields}>
-                      <View style={styles.editFormField}>
-                        <Text style={styles.editFormLabel}>Owner Name</Text>
-                        <TextInput
-                          style={styles.editFormInputStandalone}
-                          value={editFormData.ownerName}
-                          onChangeText={(value) => handleFormChange("ownerName", value)}
-                          placeholder="Enter owner name"
-                          editable={!isUpdatingResident}
-                        />
+                                const lat = location.coords.latitude;
+                                const lng = location.coords.longitude;
+
+                                setEditFormData((prev) => ({
+                                  ...prev,
+                                  latitude: lat.toString(),
+                                  longitude: lng.toString(),
+                                }));
+
+                                try {
+                                  const geocodeResult =
+                                    await Location.reverseGeocodeAsync({
+                                      latitude: lat,
+                                      longitude: lng,
+                                    });
+
+                                  if (
+                                    geocodeResult &&
+                                    geocodeResult.length > 0
+                                  ) {
+                                    const address = geocodeResult[0];
+                                    const addr = address as any;
+                                    const formattedAddress = [
+                                      addr.streetNumber,
+                                      addr.street,
+                                      addr.city,
+                                      addr.region,
+                                      addr.postalCode,
+                                      addr.country,
+                                    ]
+                                      .filter(Boolean)
+                                      .join(", ");
+
+                                    const houseNumber =
+                                      addr.streetNumber ||
+                                      formattedAddress.match(/^(\d+)/)?.[1] ||
+                                      "";
+
+                                    setEditFormData((prev) => ({
+                                      ...prev,
+                                      address: formattedAddress || prev.address,
+                                      houseNumber:
+                                        houseNumber || prev.houseNumber,
+                                    }));
+
+                                    Alert.alert(
+                                      "Location Captured",
+                                      `Address: ${
+                                        formattedAddress ||
+                                        `${lat.toFixed(6)}, ${lng.toFixed(6)}`
+                                      }`
+                                    );
+                                  } else {
+                                    Alert.alert(
+                                      "Location Captured",
+                                      `Coordinates: ${lat.toFixed(
+                                        6
+                                      )}, ${lng.toFixed(6)}`
+                                    );
+                                  }
+                                } catch (geocodeError) {
+                                  console.error(
+                                    "Error reverse geocoding:",
+                                    geocodeError
+                                  );
+                                  Alert.alert(
+                                    "Location Captured",
+                                    `Coordinates: ${lat.toFixed(
+                                      6
+                                    )}, ${lng.toFixed(6)}`
+                                  );
+                                }
+                              } catch (error: any) {
+                                Alert.alert(
+                                  "Error",
+                                  error.message || "Failed to get location"
+                                );
+                              } finally {
+                                setIsEditGettingLocation(false);
+                              }
+                            }}
+                            disabled={
+                              isUpdatingResident || isEditGettingLocation
+                            }
+                            activeOpacity={0.7}
+                          >
+                            {isEditGettingLocation ? (
+                              <ActivityIndicator
+                                size="small"
+                                color={COLORS.primary[500]}
+                              />
+                            ) : (
+                              <Ionicons
+                                name="location-outline"
+                                size={responsiveScale(16)}
+                                color={COLORS.primary[500]}
+                              />
+                            )}
+                            <Text style={styles.editFormLocationButtonText}>
+                              {isEditGettingLocation
+                                ? "Getting..."
+                                : "Use My Location"}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
                       </View>
-                      <View style={styles.editFormField}>
-                        <Text style={styles.editFormLabel}>Owner Phone</Text>
-                        <TextInput
-                          style={styles.editFormInputStandalone}
-                          value={editFormData.ownerPhone}
-                          onChangeText={(value) => handleFormChange("ownerPhone", value)}
-                          placeholder="Enter owner phone"
-                          keyboardType="phone-pad"
-                          editable={!isUpdatingResident}
-                        />
-                      </View>
-                      <View style={styles.editFormField}>
-                        <Text style={styles.editFormLabel}>Owner Email</Text>
-                        <TextInput
-                          style={styles.editFormInputStandalone}
-                          value={editFormData.ownerEmail}
-                          onChangeText={(value) => handleFormChange("ownerEmail", value)}
-                          placeholder="Enter owner email"
-                          keyboardType="email-address"
-                          autoCapitalize="none"
-                          editable={!isUpdatingResident}
-                        />
-                      </View>
-                      <View style={styles.editFormField}>
-                        <Text style={styles.editFormLabel}>Owner Mailing Address</Text>
-                        <TextInput
-                          style={styles.editFormInputStandalone}
-                          value={editFormData.ownerMailingAddress}
-                          onChangeText={(value) => handleFormChange("ownerMailingAddress", value)}
-                          placeholder="Enter owner mailing address"
-                          editable={!isUpdatingResident}
-                        />
+
+                      {/* Longitude and Latitude */}
+                      <View style={styles.editFormRow}>
+                        <View style={[styles.editFormField, { flex: 1 }]}>
+                          <Text style={styles.editFormLabel}>Longitude</Text>
+                          <TextInput
+                            style={styles.editFormInputStandalone}
+                            value={editFormData.longitude}
+                            onChangeText={(value) =>
+                              handleFormChange("longitude", value)
+                            }
+                            placeholder="Enter longitude"
+                            keyboardType="decimal-pad"
+                            editable={!isUpdatingResident}
+                          />
+                        </View>
+                        <View style={[styles.editFormField, { flex: 1 }]}>
+                          <Text style={styles.editFormLabel}>Latitude</Text>
+                          <TextInput
+                            style={styles.editFormInputStandalone}
+                            value={editFormData.latitude}
+                            onChangeText={(value) =>
+                              handleFormChange("latitude", value)
+                            }
+                            placeholder="Enter latitude"
+                            keyboardType="decimal-pad"
+                            editable={!isUpdatingResident}
+                          />
+                        </View>
                       </View>
                     </View>
                   </View>
@@ -1495,7 +1640,8 @@ export default function ManualZoneFormScreen() {
                   key={status}
                   style={[
                     styles.statusModalOption,
-                    editFormData.status === status && styles.statusModalOptionActive,
+                    editFormData.status === status &&
+                      styles.statusModalOptionActive,
                   ]}
                   onPress={() => {
                     handleFormChange("status", status);
@@ -1505,7 +1651,8 @@ export default function ManualZoneFormScreen() {
                   <Text
                     style={[
                       styles.statusModalOptionText,
-                      editFormData.status === status && styles.statusModalOptionTextActive,
+                      editFormData.status === status &&
+                        styles.statusModalOptionTextActive,
                     ]}
                   >
                     {getStatusDisplayName(status)}
@@ -1535,7 +1682,9 @@ export default function ManualZoneFormScreen() {
               <View style={styles.propertyModalHeaderButtons}>
                 {selectedPropertyForDetails && (
                   <TouchableOpacity
-                    onPress={() => handleEditProperty(selectedPropertyForDetails)}
+                    onPress={() =>
+                      handleEditProperty(selectedPropertyForDetails)
+                    }
                     style={styles.propertyModalEditButton}
                     activeOpacity={0.7}
                   >
@@ -1690,8 +1839,13 @@ export default function ManualZoneFormScreen() {
                                 color={COLORS.text.secondary}
                               />
                               <Text style={styles.propertyDetailContactText}>
-                                {selectedPropertyForDetails.coordinates[1].toFixed(6)},{" "}
-                                {selectedPropertyForDetails.coordinates[0].toFixed(6)}
+                                {selectedPropertyForDetails.coordinates[1].toFixed(
+                                  6
+                                )}
+                                ,{" "}
+                                {selectedPropertyForDetails.coordinates[0].toFixed(
+                                  6
+                                )}
                               </Text>
                             </View>
                           )}
@@ -1763,7 +1917,9 @@ export default function ManualZoneFormScreen() {
                             <TouchableOpacity
                               style={styles.propertyDetailContactRow}
                               onPress={() =>
-                                handlePhonePress(detailedProperty.resident.phone)
+                                handlePhonePress(
+                                  detailedProperty.resident.phone
+                                )
                               }
                             >
                               <Ionicons
@@ -1851,7 +2007,8 @@ export default function ManualZoneFormScreen() {
                                 color={COLORS.error[500]}
                               />
                               <Text style={styles.propertyDetailContactText}>
-                                Owner: {detailedProperty.propertyData.ownerPhone}
+                                Owner:{" "}
+                                {detailedProperty.propertyData.ownerPhone}
                               </Text>
                             </TouchableOpacity>
                           )}
@@ -1871,7 +2028,8 @@ export default function ManualZoneFormScreen() {
                           )}
 
                           {/* Owner Mailing Address */}
-                          {detailedProperty.propertyData?.ownerMailingAddress && (
+                          {detailedProperty.propertyData
+                            ?.ownerMailingAddress && (
                             <View style={styles.propertyDetailContactRow}>
                               <Ionicons
                                 name="location-outline"
@@ -1879,7 +2037,10 @@ export default function ManualZoneFormScreen() {
                                 color={COLORS.text.secondary}
                               />
                               <Text style={styles.propertyDetailContactText}>
-                                {detailedProperty.propertyData.ownerMailingAddress}
+                                {
+                                  detailedProperty.propertyData
+                                    .ownerMailingAddress
+                                }
                               </Text>
                             </View>
                           )}
@@ -1888,24 +2049,25 @@ export default function ManualZoneFormScreen() {
                     </View>
 
                     {/* Next Property Button */}
-                    {selectedPropertyForDetails && filteredProperties.length > 1 && (
-                      <View style={styles.propertyDetailNextButtonContainer}>
-                        <TouchableOpacity
-                          style={styles.propertyDetailNextButton}
-                          onPress={handleNextPropertyDetails}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={styles.propertyDetailNextButtonText}>
-                            Next Property
-                          </Text>
-                          <Ionicons
-                            name="chevron-forward"
-                            size={responsiveScale(18)}
-                            color={COLORS.white}
-                          />
-                        </TouchableOpacity>
-                      </View>
-                    )}
+                    {selectedPropertyForDetails &&
+                      filteredProperties.length > 1 && (
+                        <View style={styles.propertyDetailNextButtonContainer}>
+                          <TouchableOpacity
+                            style={styles.propertyDetailNextButton}
+                            onPress={handleNextPropertyDetails}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={styles.propertyDetailNextButtonText}>
+                              Next Property
+                            </Text>
+                            <Ionicons
+                              name="chevron-forward"
+                              size={responsiveScale(18)}
+                              color={COLORS.white}
+                            />
+                          </TouchableOpacity>
+                        </View>
+                      )}
                   </>
                 ) : (
                   <View style={styles.propertyModalError}>
@@ -2156,6 +2318,14 @@ const styles = StyleSheet.create({
     fontSize: responsiveScale(12),
     fontWeight: "600",
     color: COLORS.white,
+  },
+  editModalChevronButton: {
+    padding: responsiveSpacing(SPACING.xs),
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  editModalChevronButtonDisabled: {
+    opacity: 0.3,
   },
   editModalCloseButton: {
     padding: responsiveSpacing(SPACING.xs),
@@ -2433,7 +2603,7 @@ const styles = StyleSheet.create({
     color: COLORS.text.primary,
   },
   statusModalOptionTextActive: {
-    color: COLORS.primary[700],
+    color: COLORS.primary[600],
     fontWeight: "600",
   },
   editFormErrorContainer: {
@@ -2646,4 +2816,3 @@ const styles = StyleSheet.create({
     color: COLORS.white,
   },
 });
-
