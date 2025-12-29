@@ -31,13 +31,9 @@ export interface AgentDashboardResponse {
 export const getAgentDashboardStats =
   async (): Promise<AgentDashboardResponse> => {
     try {
-      console.log(
-        "📊 Fetching agent dashboard stats from /users/dashboard-stats"
-      );
       const response = await apiInstance.get<AgentDashboardResponse>(
         "/users/dashboard-stats"
       );
-      console.log("✅ Dashboard stats fetched successfully");
       return response.data;
     } catch (error: any) {
       console.error("❌ Error fetching dashboard stats:", error);

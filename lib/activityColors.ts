@@ -12,56 +12,27 @@ export interface ActivityColors {
  * @returns Object with dotColor and backgroundColor
  */
 export const getActivityColors = (activity: Activity): ActivityColors => {
-  console.log("🎨 getActivityColors called with activity:", {
-    _id: activity._id,
-    activityType: activity.activityType,
-    operationType: activity.operationType,
-    response: activity.response,
-    notes: activity.notes?.substring(0, 50) + "...", // Truncate for readability
-  });
-
   // Handle VISIT activities - color based on response
   if (activity.activityType === "VISIT" && activity.response) {
-    const colors = getVisitActivityColors(activity.response);
-    console.log(
-      `✅ VISIT activity - response: ${activity.response}, colors:`,
-      colors
-    );
-    return colors;
+    return getVisitActivityColors(activity.response);
   }
 
   // Handle PROPERTY_OPERATION activities - color based on status change in notes
   if (activity.activityType === "PROPERTY_OPERATION") {
-    const colors = getPropertyOperationColors(activity);
-    console.log(
-      `✅ PROPERTY_OPERATION activity - operationType: ${activity.operationType}, colors:`,
-      colors
-    );
-    return colors;
+    return getPropertyOperationColors(activity);
   }
 
   // Handle ZONE_OPERATION activities - color based on operationType
   if (activity.activityType === "ZONE_OPERATION") {
-    const colors = getZoneOperationColors(activity.operationType);
-    console.log(
-      `✅ ZONE_OPERATION activity - operationType: ${activity.operationType}, colors:`,
-      colors
-    );
-    return colors;
+    return getZoneOperationColors(activity.operationType);
   }
 
   // Handle ROUTE_OPERATION activities - color based on operationType (same as zone operations)
   if (activity.activityType === "ROUTE_OPERATION") {
-    const colors = getZoneOperationColors(activity.operationType); // Reuse zone operation colors
-    console.log(
-      `✅ ROUTE_OPERATION activity - operationType: ${activity.operationType}, colors:`,
-      colors
-    );
-    return colors;
+    return getZoneOperationColors(activity.operationType); // Reuse zone operation colors
   }
 
   // Default fallback (shouldn't happen, but just in case)
-  console.log("⚠️ Default fallback colors used");
   return {
     dotColor: COLORS.neutral[500],
     backgroundColor: COLORS.neutral[50],

@@ -32,9 +32,7 @@ export interface Resident {
  */
 export const getMyNotVisitedResidents = async (limit: number = 3): Promise<Resident[]> => {
   try {
-    console.log("📝 [getMyNotVisitedResidents] Fetching leads (visited residents), limit:", limit);
     const response = await apiInstance.get<Resident[]>(`/residents/my-not-visited?limit=${limit}`);
-    console.log("✅ [getMyNotVisitedResidents] Found leads:", response.data.length);
     return response.data;
   } catch (error: any) {
     console.error("❌ Error fetching leads:", error);

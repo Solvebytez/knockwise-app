@@ -399,8 +399,16 @@ function ManualZoneCard({ zone, isCreatedByAgent }: ManualZoneCardProps) {
     return parts.length > 0 ? parts.join(" > ") : "No location assigned";
   };
 
+  const handleCardPress = () => {
+    router.push(`/manual-zone-form?zoneId=${zone._id}`);
+  };
+
   return (
-    <View style={styles.zoneCard}>
+    <TouchableOpacity
+      style={styles.zoneCard}
+      onPress={handleCardPress}
+      activeOpacity={0.7}
+    >
       <View style={styles.zoneHeader}>
         <View style={styles.zoneHeaderLeft}>
           <View
@@ -528,29 +536,23 @@ function ManualZoneCard({ zone, isCreatedByAgent }: ManualZoneCardProps) {
       )}
 
       {/* Action Buttons */}
-      <View style={styles.actionButtons}>
-        <Button
-          variant="outline"
-          size="small"
-          title="View Zone"
-          onPress={() => router.push(`/manual-zone-form?zoneId=${zone._id}`)}
-          containerStyle={styles.actionButton}
-        />
-        {isCreatedByAgent && (
+      {isCreatedByAgent && (
+        <View style={styles.actionButtons}>
           <Button
             variant="outline"
             size="small"
             title="Edit"
-            onPress={() => {
+            onPress={(e) => {
+              e?.stopPropagation?.();
               console.log("📝 Edit button pressed for zone:", zone._id);
               console.log("📝 Navigating to:", `/manual-zone-form?zoneId=${zone._id}&mode=edit`);
               router.push(`/manual-zone-form?zoneId=${zone._id}&mode=edit`);
             }}
             containerStyle={styles.actionButton}
           />
-        )}
-      </View>
-    </View>
+        </View>
+      )}
+    </TouchableOpacity>
   );
 }
 
@@ -604,6 +606,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 1,
+    justifyContent: "center",
+    alignItems: "center",
   },
   statCard1: {
     backgroundColor: COLORS.primary[100],
@@ -615,16 +619,18 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.warning[100],
   },
   statCardHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+    flexDirection: "column",
+    justifyContent: "center",
     alignItems: "center",
     marginBottom: responsiveSpacing(SPACING.xs),
+    width: "100%",
+    gap: responsiveSpacing(SPACING.xs / 2),
   },
   statLabel: {
     fontSize: responsiveScale(12),
     color: COLORS.text.secondary,
     fontWeight: "500",
-    flex: 1,
+    textAlign: "center",
   },
   statIcon: {
     fontSize: responsiveScale(16),
@@ -634,9 +640,11 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: COLORS.text.primary,
     marginBottom: responsiveSpacing(SPACING.xs / 2),
+    textAlign: "center",
   },
   statSubtext: {
     fontSize: responsiveScale(10),
+    textAlign: "center",
   },
   searchContainer: {
     paddingHorizontal: responsiveSpacing(PADDING.screenLarge),

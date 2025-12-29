@@ -52,18 +52,18 @@ interface Property {
   createdAt: string;
 }
 
-// Status display name helper
+// Status display name helper (with emoji icons like map zone)
 const getStatusDisplayName = (status: string): string => {
   const statusNames: Record<string, string> = {
-    "not-visited": "Not Visited",
-    interested: "Interested",
-    visited: "Visited",
-    appointment: "Appointment",
-    "follow-up": "Follow Up",
-    "not-interested": "Not Interested",
-    "not-opened": "Not Opened",
+    "not-visited": "⏳ Not Visited",
+    interested: "✓ Interested",
+    visited: "✓ Visited",
+    appointment: "📅 Appointment",
+    "follow-up": "🔄 Follow-up",
+    "not-interested": "❌ Not Interested",
+    "not-opened": "🚪 Not Opened",
   };
-  return statusNames[status] || status;
+  return statusNames[status] || "⏳ Not Visited";
 };
 
 // Status colors
@@ -110,6 +110,7 @@ export default function ManualZoneFormScreen() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [editStatusDropdownVisible, setEditStatusDropdownVisible] =
     useState(false);
+  const [isQuickAddingProperty, setIsQuickAddingProperty] = useState(false);
 
   // Address autocomplete states
   const [addressSuggestions, setAddressSuggestions] = useState<any[]>([]);
@@ -302,7 +303,6 @@ export default function ManualZoneFormScreen() {
         const response = await apiInstance.get(
           `/residents/${selectedPropertyForDetails._id}`
         );
-        console.log("✅ Property details fetched:", response.data.data);
         return response.data.data;
       },
       enabled: !!selectedPropertyForDetails?._id && isDetailModalOpen,
@@ -316,9 +316,7 @@ export default function ManualZoneFormScreen() {
       queryKey: ["propertyDetails", editPropertyId],
       queryFn: async () => {
         if (!editPropertyId) return null;
-        console.log("📡 Fetching property details for edit:", editPropertyId);
         const response = await apiInstance.get(`/residents/${editPropertyId}`);
-        console.log("✅ Edit property details fetched:", response.data.data);
         return response.data.data;
       },
       enabled: !!editPropertyId && isEditModalOpen,
@@ -375,7 +373,6 @@ export default function ManualZoneFormScreen() {
   // Update form data when editPropertyDetails loads
   useEffect(() => {
     if (editPropertyDetails && selectedProperty) {
-      console.log("📝 Updating form data with fetched property details");
       // Get today's date in YYYY-MM-DD format
       const today = new Date().toISOString().split("T")[0];
       setEditFormData((prev) => ({
@@ -453,10 +450,331 @@ export default function ManualZoneFormScreen() {
     void refetchProperties();
   };
 
-  // Handle property click to open details modal
+  // Helper function to parse street data from address
+  const parseStreetData = (address: string) => {
+    const match = address.trim().match(/^(\d+)\s+(.*)$/);
+    if (!match) {
+      return { number: null, street: "" };
+    }
+    return {
+      number: parseInt(match[1], 10),
+      street: match[2],
+    };
+  };
+
+  // Helper function to geocode address
+  const geocodeAddressWithPlaces = async (address: string) => {
+    const { getGoogleMapsApiKey } = await import("@/lib/googleMaps");
+    let apiKey = getGoogleMapsApiKey();
+    if (!apiKey) {
+      console.warn(
+        "[ManualZoneForm] Google Maps API key missing, using fallback key"
+      );
+      apiKey = "AIzaSyCe1aICpk2SmN3ArHwp-79FnsOk38k072M";
+    }
+    if (!apiKey) {
+      throw new Error("Google Maps API key not configured");
+    }
+
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
+      address
+    )}&key=${apiKey}`;
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(
+        `Geocoding API request failed: ${response.status} ${response.statusText}`
+      );
+    }
+
+    const data = await response.json();
+    if (data.status === "ZERO_RESULTS") {
+      throw new Error("No location data found for this address");
+    }
+    if (data.status !== "OK" || !data.results || data.results.length === 0) {
+      throw new Error(
+        data.error_message || "Unable to validate address. Please try again."
+      );
+    }
+
+    const result = data.results[0];
+    const { lat, lng } = result.geometry.location;
+    return {
+      latitude: lat,
+      longitude: lng,
+      formattedAddress: result.formatted_address,
+    };
+  };
+
+  // Quick add property function
+  const handleQuickAddProperty = async () => {
+    if (!zoneContext?.zoneId) {
+      Alert.alert(
+        "Zone missing",
+        "Please configure the zone details before adding properties."
+      );
+      return;
+    }
+
+    if (filteredProperties.length === 0) {
+      Alert.alert(
+        "No properties",
+        "Please add the first property using the 'Add Property' button above."
+      );
+      return;
+    }
+
+    try {
+      setIsQuickAddingProperty(true);
+
+      // Get last property from filtered list
+      const lastProp = filteredProperties[filteredProperties.length - 1];
+      const { number: lastNumber, street: lastStreet } = parseStreetData(
+        lastProp.address
+      );
+
+      if (!lastNumber || !lastStreet) {
+        Alert.alert(
+          "Invalid address format",
+          "Unable to calculate next property. Please use the 'Add Property' button to add manually."
+        );
+        return;
+      }
+
+      // Calculate next house number based on mode
+      let nextNumber: number;
+      if (selectedMode === "even") {
+        // Next even number
+        nextNumber = lastNumber % 2 === 0 ? lastNumber + 2 : lastNumber + 1;
+      } else if (selectedMode === "odd") {
+        // Next odd number
+        nextNumber = lastNumber % 2 !== 0 ? lastNumber + 2 : lastNumber + 1;
+      } else {
+        // Sequential: just add 1
+        nextNumber = lastNumber + 1;
+      }
+
+      // Construct next address
+      const nextAddress = `${nextNumber} ${lastStreet}`;
+
+      // Geocode the new address to get coordinates
+      let latitude: number;
+      let longitude: number;
+      let formattedAddress: string;
+
+      try {
+        const geocodeData = await geocodeAddressWithPlaces(nextAddress);
+        latitude = geocodeData.latitude;
+        longitude = geocodeData.longitude;
+        formattedAddress = geocodeData.formattedAddress || nextAddress;
+      } catch (geocodeError) {
+        // If geocoding fails, use coordinates from last property with slight offset
+        console.warn(
+          "[ManualZoneForm] Geocoding failed, using last property coordinates:",
+          geocodeError
+        );
+        // Use last property's coordinates as fallback
+        latitude = lastProp.coordinates[1];
+        longitude = lastProp.coordinates[0];
+        formattedAddress = nextAddress;
+      }
+
+      // Prepare payload (same as modal)
+      const payload = {
+        zoneId: zoneContext.zoneId,
+        address: formattedAddress.trim(),
+        houseNumber: nextNumber,
+        coordinates: [longitude, latitude],
+        status: "not-visited",
+        dataSource: "MANUAL",
+        notes: undefined, // No notes for quick add
+      };
+
+      console.log("📝 [ManualZoneForm] Quick adding property:", payload);
+
+      // Save property
+      const response = await apiInstance.post("/residents", payload);
+
+      console.log("✅ [ManualZoneForm] Property quick-added successfully:", {
+        residentId: response.data?.data?._id,
+        zoneId: payload.zoneId,
+      });
+
+      // Refresh properties list
+      await refetchProperties();
+
+      // Show success feedback (optional - can be removed for faster flow)
+      // Alert.alert("Added", "Property added successfully.");
+    } catch (error: any) {
+      console.error("[ManualZoneForm] Failed to quick-add property:", error);
+      Alert.alert(
+        "Add failed",
+        error?.response?.data?.message ||
+          "Unable to add property. Please try again."
+      );
+    } finally {
+      setIsQuickAddingProperty(false);
+    }
+  };
+
+  // Quick add property from edit modal (uses selected property as base)
+  const handleQuickAddFromEditModal = async () => {
+    if (!zoneContext?.zoneId) {
+      Alert.alert(
+        "Zone missing",
+        "Please configure the zone details before adding properties."
+      );
+      return;
+    }
+
+    if (!selectedProperty) {
+      Alert.alert(
+        "No property selected",
+        "Please select a property to use as base for quick add."
+      );
+      return;
+    }
+
+    try {
+      setIsQuickAddingProperty(true);
+
+      // Use selected property as base
+      const { number: baseNumber, street: baseStreet } = parseStreetData(
+        selectedProperty.address
+      );
+
+      if (!baseNumber || !baseStreet) {
+        Alert.alert(
+          "Invalid address format",
+          "Unable to calculate next property. Please use the 'Add Property' button to add manually."
+        );
+        return;
+      }
+
+      // Calculate next house number based on mode
+      let nextNumber: number;
+      if (selectedMode === "even") {
+        // Next even number
+        nextNumber = baseNumber % 2 === 0 ? baseNumber + 2 : baseNumber + 1;
+      } else if (selectedMode === "odd") {
+        // Next odd number
+        nextNumber = baseNumber % 2 !== 0 ? baseNumber + 2 : baseNumber + 1;
+      } else {
+        // Sequential: just add 1
+        nextNumber = baseNumber + 1;
+      }
+
+      // Construct next address
+      const nextAddress = `${nextNumber} ${baseStreet}`;
+
+      // Geocode the new address to get coordinates
+      let latitude: number;
+      let longitude: number;
+      let formattedAddress: string;
+
+      try {
+        const geocodeData = await geocodeAddressWithPlaces(nextAddress);
+        latitude = geocodeData.latitude;
+        longitude = geocodeData.longitude;
+        formattedAddress = geocodeData.formattedAddress || nextAddress;
+      } catch (geocodeError) {
+        // If geocoding fails, use coordinates from selected property
+        console.warn(
+          "[ManualZoneForm] Geocoding failed, using selected property coordinates:",
+          geocodeError
+        );
+        // Use selected property's coordinates as fallback
+        latitude = selectedProperty.coordinates[1];
+        longitude = selectedProperty.coordinates[0];
+        formattedAddress = nextAddress;
+      }
+
+      // Prepare payload
+      const payload = {
+        zoneId: zoneContext.zoneId,
+        address: formattedAddress.trim(),
+        houseNumber: nextNumber,
+        coordinates: [longitude, latitude],
+        status: "not-visited",
+        dataSource: "MANUAL",
+        notes: undefined, // No notes for quick add
+      };
+
+      console.log(
+        "📝 [ManualZoneForm] Quick adding property from edit modal:",
+        payload
+      );
+
+      // Save property
+      const response = await apiInstance.post("/residents", payload);
+
+      console.log(
+        "✅ [ManualZoneForm] Property quick-added successfully from edit modal:",
+        {
+          residentId: response.data?.data?._id,
+          zoneId: payload.zoneId,
+        }
+      );
+
+      // Refresh properties list and get the new property
+      const newPropertyId = response.data?.data?._id;
+      if (newPropertyId) {
+        // Refetch properties list
+        const refetchResult = await refetchProperties();
+        // The response structure is: { data: { data: { residents: [...] } } }
+        const refetchedProperties: Property[] =
+          refetchResult.data?.data?.residents || [];
+        const newProperty = refetchedProperties.find(
+          (p) => p._id === newPropertyId
+        );
+
+        if (newProperty) {
+          // Switch to editing the new property
+          setSelectedProperty(newProperty);
+          setEditPropertyId(newProperty._id);
+
+          // Get today's date in YYYY-MM-DD format
+          const today = new Date().toISOString().split("T")[0];
+
+          // Initialize form data with new property values
+          setEditFormData({
+            address: newProperty.address,
+            houseNumber: newProperty.houseNumber?.toString() || "",
+            longitude: newProperty.coordinates[0]?.toString() || "",
+            latitude: newProperty.coordinates[1]?.toString() || "",
+            status: newProperty.status,
+            lastVisited: newProperty.lastVisited
+              ? new Date(newProperty.lastVisited).toISOString().split("T")[0]
+              : today,
+            notes: newProperty.notes || "",
+            phone: "",
+            email: "",
+            ownerName: "",
+            ownerPhone: "",
+            ownerEmail: "",
+            ownerMailingAddress: "",
+          });
+        }
+      }
+    } catch (error: any) {
+      console.error(
+        "[ManualZoneForm] Failed to quick-add property from edit modal:",
+        error
+      );
+      Alert.alert(
+        "Add failed",
+        error?.response?.data?.message ||
+          "Unable to add property. Please try again."
+      );
+    } finally {
+      setIsQuickAddingProperty(false);
+    }
+  };
+
+  // Handle property click to open edit modal (like map zone view)
   const handlePropertyClick = (property: Property) => {
-    setSelectedPropertyForDetails(property);
-    setIsDetailModalOpen(true);
+    // Open edit modal directly instead of detail modal
+    handleEditProperty(property);
   };
 
   // Handle close detail modal
@@ -1177,14 +1495,37 @@ export default function ManualZoneFormScreen() {
                         </View>
 
                         {/* Notes */}
-                        {property.notes && (
-                          <Text style={styles.propertyNotes}>
-                            {property.notes}
-                          </Text>
-                        )}
+                        <Text style={styles.propertyNotes}>
+                          {property.notes || "No note"}
+                        </Text>
                       </View>
                     </TouchableOpacity>
                   ))}
+                </View>
+              )}
+
+              {/* Quick Add Button at Bottom */}
+              {filteredProperties.length > 0 && zoneContext && (
+                <View style={styles.quickAddContainer}>
+                  <Button
+                    title={isQuickAddingProperty ? "Adding..." : "Quick Add"}
+                    variant="primary"
+                    size="medium"
+                    fullWidth
+                    onPress={handleQuickAddProperty}
+                    loading={isQuickAddingProperty}
+                    disabled={isQuickAddingProperty || !zoneContext}
+                    leftIcon={
+                      isQuickAddingProperty ? undefined : (
+                        <MaterialIcons
+                          name="add-circle"
+                          size={responsiveScale(20)}
+                          color={COLORS.white}
+                        />
+                      )
+                    }
+                    containerStyle={styles.quickAddButton}
+                  />
                 </View>
               )}
             </View>
@@ -1250,6 +1591,24 @@ export default function ManualZoneFormScreen() {
             <View style={styles.editModalHeader}>
               <View style={styles.editModalHeaderLeft}>
                 <Text style={styles.editModalTitle}>Edit Property</Text>
+                {/* Eye icon to view details */}
+                {selectedProperty && (
+                  <TouchableOpacity
+                    style={styles.editModalEyeButton}
+                    onPress={() => {
+                      setIsEditModalOpen(false);
+                      setSelectedPropertyForDetails(selectedProperty);
+                      setIsDetailModalOpen(true);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons
+                      name="eye-outline"
+                      size={responsiveScale(20)}
+                      color={COLORS.text.secondary}
+                    />
+                  </TouchableOpacity>
+                )}
                 {/* Previous Property Chevron - only show if more than 1 property */}
                 {selectedProperty && filteredProperties.length > 1 && (
                   <TouchableOpacity
@@ -1719,37 +2078,70 @@ export default function ManualZoneFormScreen() {
               <TouchableOpacity
                 style={styles.editModalCancelButton}
                 onPress={handleCloseEditModal}
-                disabled={isUpdatingResident}
+                disabled={isUpdatingResident || isQuickAddingProperty}
                 activeOpacity={0.7}
               >
                 <Text style={styles.editModalCancelButtonText}>Cancel</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[
-                  styles.editModalSaveButton,
-                  (!isEditFormValid() || isUpdatingResident) &&
-                    styles.editModalSaveButtonDisabled,
-                ]}
-                onPress={() => handleUpdateResident(false)}
-                disabled={isUpdatingResident || !isEditFormValid()}
-                activeOpacity={0.7}
-              >
-                {isUpdatingResident && (
-                  <ActivityIndicator
-                    size="small"
-                    color={COLORS.white}
-                    style={{ marginRight: responsiveSpacing(SPACING.xs) }}
-                  />
-                )}
-                <Text style={styles.editModalSaveButtonText}>
-                  {isUpdatingResident
-                    ? "Saving..."
-                    : isEditValidating
-                    ? "Validating..."
-                    : "Save Changes"}
-                </Text>
-              </TouchableOpacity>
+              <View style={styles.editModalRightButtons}>
+                <TouchableOpacity
+                  style={[
+                    styles.editModalQuickAddButton,
+                    (isUpdatingResident ||
+                      isQuickAddingProperty ||
+                      !zoneContext) &&
+                      styles.editModalQuickAddButtonDisabled,
+                  ]}
+                  onPress={handleQuickAddFromEditModal}
+                  disabled={
+                    isUpdatingResident || isQuickAddingProperty || !zoneContext
+                  }
+                  activeOpacity={0.7}
+                >
+                  {isQuickAddingProperty ? (
+                    <ActivityIndicator size="small" color={COLORS.white} />
+                  ) : (
+                    <MaterialIcons
+                      name="add-circle"
+                      size={responsiveScale(20)}
+                      color={COLORS.white}
+                    />
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.editModalSaveButton,
+                    (!isEditFormValid() ||
+                      isUpdatingResident ||
+                      isQuickAddingProperty) &&
+                      styles.editModalSaveButtonDisabled,
+                  ]}
+                  onPress={() => handleUpdateResident(false)}
+                  disabled={
+                    isUpdatingResident ||
+                    !isEditFormValid() ||
+                    isQuickAddingProperty
+                  }
+                  activeOpacity={0.7}
+                >
+                  {isUpdatingResident && (
+                    <ActivityIndicator
+                      size="small"
+                      color={COLORS.white}
+                      style={{ marginRight: responsiveSpacing(SPACING.xs) }}
+                    />
+                  )}
+                  <Text style={styles.editModalSaveButtonText}>
+                    {isUpdatingResident
+                      ? "Saving..."
+                      : isEditValidating
+                      ? "Validating..."
+                      : "Save Changes"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </Pressable>
@@ -1956,92 +2348,20 @@ export default function ManualZoneFormScreen() {
 
                     {/* Main Content Card */}
                     <View style={styles.propertyDetailContentCard}>
-                      {/* Property Information */}
-                      {(detailedProperty.resident?.houseNumber ||
-                        selectedPropertyForDetails?.houseNumber ||
-                        selectedPropertyForDetails?.coordinates ||
-                        detailedProperty.resident?.lastVisited ||
-                        selectedPropertyForDetails?.lastVisited ||
-                        detailedProperty.resident?.notes ||
+                      {/* Notes */}
+                      {(detailedProperty.resident?.notes ||
                         selectedPropertyForDetails?.notes) && (
-                        <>
-                          <Text style={styles.propertyDetailSectionTitle}>
-                            Property Information
+                        <View style={styles.propertyDetailContactRow}>
+                          <Ionicons
+                            name="document-text-outline"
+                            size={responsiveScale(20)}
+                            color={COLORS.text.secondary}
+                          />
+                          <Text style={styles.propertyDetailContactText}>
+                            {detailedProperty.resident?.notes ||
+                              selectedPropertyForDetails?.notes}
                           </Text>
-
-                          {/* House Number */}
-                          {(detailedProperty.resident?.houseNumber ||
-                            selectedPropertyForDetails?.houseNumber) && (
-                            <View style={styles.propertyDetailContactRow}>
-                              <Ionicons
-                                name="home-outline"
-                                size={responsiveScale(20)}
-                                color={COLORS.text.secondary}
-                              />
-                              <Text style={styles.propertyDetailContactText}>
-                                House #
-                                {detailedProperty.resident?.houseNumber ||
-                                  selectedPropertyForDetails?.houseNumber}
-                              </Text>
-                            </View>
-                          )}
-
-                          {/* Coordinates */}
-                          {selectedPropertyForDetails?.coordinates && (
-                            <View style={styles.propertyDetailContactRow}>
-                              <Ionicons
-                                name="location-outline"
-                                size={responsiveScale(20)}
-                                color={COLORS.text.secondary}
-                              />
-                              <Text style={styles.propertyDetailContactText}>
-                                {selectedPropertyForDetails.coordinates[1].toFixed(
-                                  6
-                                )}
-                                ,{" "}
-                                {selectedPropertyForDetails.coordinates[0].toFixed(
-                                  6
-                                )}
-                              </Text>
-                            </View>
-                          )}
-
-                          {/* Last Visited */}
-                          {(detailedProperty.resident?.lastVisited ||
-                            selectedPropertyForDetails?.lastVisited) && (
-                            <View style={styles.propertyDetailContactRow}>
-                              <Ionicons
-                                name="calendar-outline"
-                                size={responsiveScale(20)}
-                                color={COLORS.text.secondary}
-                              />
-                              <Text style={styles.propertyDetailContactText}>
-                                Last Visited:{" "}
-                                {new Date(
-                                  detailedProperty.resident?.lastVisited ||
-                                    selectedPropertyForDetails?.lastVisited ||
-                                    ""
-                                ).toLocaleDateString()}
-                              </Text>
-                            </View>
-                          )}
-
-                          {/* Notes */}
-                          {(detailedProperty.resident?.notes ||
-                            selectedPropertyForDetails?.notes) && (
-                            <View style={styles.propertyDetailContactRow}>
-                              <Ionicons
-                                name="document-text-outline"
-                                size={responsiveScale(20)}
-                                color={COLORS.text.secondary}
-                              />
-                              <Text style={styles.propertyDetailContactText}>
-                                {detailedProperty.resident?.notes ||
-                                  selectedPropertyForDetails?.notes}
-                              </Text>
-                            </View>
-                          )}
-                        </>
+                        </View>
                       )}
 
                       {/* Contact Information */}
@@ -2053,11 +2373,6 @@ export default function ManualZoneFormScreen() {
                               styles.propertyDetailSectionTitle,
                               {
                                 marginTop:
-                                  detailedProperty.resident?.houseNumber ||
-                                  selectedPropertyForDetails?.houseNumber ||
-                                  selectedPropertyForDetails?.coordinates ||
-                                  detailedProperty.resident?.lastVisited ||
-                                  selectedPropertyForDetails?.lastVisited ||
                                   detailedProperty.resident?.notes ||
                                   selectedPropertyForDetails?.notes
                                     ? responsiveSpacing(SPACING.lg)
@@ -2116,13 +2431,6 @@ export default function ManualZoneFormScreen() {
                               styles.propertyDetailSectionTitle,
                               {
                                 marginTop:
-                                  detailedProperty.resident?.houseNumber ||
-                                  selectedPropertyForDetails?.houseNumber ||
-                                  selectedPropertyForDetails?.coordinates ||
-                                  detailedProperty.resident?.lastVisited ||
-                                  selectedPropertyForDetails?.lastVisited ||
-                                  detailedProperty.resident?.notes ||
-                                  selectedPropertyForDetails?.notes ||
                                   detailedProperty.resident?.phone ||
                                   detailedProperty.resident?.email
                                     ? responsiveSpacing(SPACING.lg)
@@ -2324,6 +2632,15 @@ const styles = StyleSheet.create({
   propertiesList: {
     gap: responsiveSpacing(SPACING.sm),
   },
+  quickAddContainer: {
+    marginTop: responsiveSpacing(SPACING.lg),
+    paddingTop: responsiveSpacing(SPACING.md),
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border.light,
+  },
+  quickAddButton: {
+    backgroundColor: COLORS.success[500],
+  },
   propertyCard: {
     backgroundColor: COLORS.white,
     borderRadius: responsiveScale(12),
@@ -2456,6 +2773,11 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: COLORS.text.primary,
   },
+  editModalEyeButton: {
+    padding: responsiveSpacing(SPACING.xs / 2),
+    justifyContent: "center",
+    alignItems: "center",
+  },
   editModalNextButtonHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -2525,11 +2847,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: responsiveSpacing(SPACING.md),
     borderRadius: responsiveScale(8),
     backgroundColor: COLORS.neutral[100],
+    minHeight: responsiveScale(40),
+    justifyContent: "center",
+    alignItems: "center",
   },
   editModalCancelButtonText: {
-    fontSize: responsiveScale(14),
+    fontSize: responsiveScale(12),
     fontWeight: "500",
     color: COLORS.text.secondary,
+  },
+  editModalRightButtons: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: responsiveSpacing(SPACING.sm),
   },
   editModalNextButton: {
     flexDirection: "row",
@@ -2552,20 +2882,42 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: COLORS.white,
   },
+  editModalQuickAddButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: responsiveSpacing(SPACING.sm),
+    paddingHorizontal: responsiveSpacing(SPACING.sm),
+    borderRadius: responsiveScale(8),
+    backgroundColor: COLORS.success[500],
+    minWidth: responsiveScale(40),
+    minHeight: responsiveScale(40),
+  },
+  editModalQuickAddButtonDisabled: {
+    backgroundColor: COLORS.neutral[300],
+    opacity: 0.5,
+  },
+  editModalQuickAddButtonText: {
+    fontSize: responsiveScale(12),
+    fontWeight: "600",
+    color: COLORS.white,
+  },
   editModalSaveButton: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     paddingVertical: responsiveSpacing(SPACING.sm),
     paddingHorizontal: responsiveSpacing(SPACING.md),
     borderRadius: responsiveScale(8),
     backgroundColor: COLORS.primary[500],
+    minHeight: responsiveScale(40),
   },
   editModalSaveButtonDisabled: {
     backgroundColor: COLORS.neutral[300],
     opacity: 0.5,
   },
   editModalSaveButtonText: {
-    fontSize: responsiveScale(14),
+    fontSize: responsiveScale(12),
     fontWeight: "600",
     color: COLORS.white,
   },

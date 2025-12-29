@@ -169,7 +169,6 @@ apiInstance.interceptors.request.use(
 
       // Check if token should be refreshed proactively (expires within 5 minutes)
       if (shouldRefreshToken(accessToken, 5)) {
-        console.log("🔄 Access token expires soon, refreshing proactively...");
 
         // Use refresh queue to prevent multiple simultaneous refresh calls
         // If refresh is already in progress, wait for that promise
@@ -192,7 +191,6 @@ apiInstance.interceptors.request.use(
             );
             if (newAccessToken) {
               config.headers.Authorization = `Bearer ${newAccessToken}`;
-              console.log("✅ Token refreshed proactively, using new token");
               
               // Reload CSRF token after refresh (backend generates new CSRF token on refresh)
               if (config.method && config.method.toLowerCase() !== "get") {
@@ -268,7 +266,6 @@ apiInstance.interceptors.response.use(
       originalRequest._retry = true;
       originalRequest._skipTokenCheck = true; // Skip token check for this request
 
-      console.log("🔄 Received 401 Unauthorized, attempting to refresh token...");
 
       // Use refresh queue to prevent multiple simultaneous refresh calls
       if (!refreshPromise) {
@@ -317,7 +314,6 @@ apiInstance.interceptors.response.use(
               }
             }
             
-            console.log("✅ Token refreshed, retrying original request");
             return apiInstance(originalRequest); // Retry the original request
           } else {
             // Fallback: refresh succeeded but no new token found

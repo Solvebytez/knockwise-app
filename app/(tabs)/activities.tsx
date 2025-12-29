@@ -146,18 +146,7 @@ export default function ActivitiesScreen() {
   const renderActivityItem = useCallback(
     ({ item: activity }: { item: Activity }) => {
       const time = formatTimeAgo(activity.startedAt || activity.createdAt);
-      
-      console.log("📋 Activities Screen - Activity:", {
-        activityId: activity._id,
-        activityType: activity.activityType,
-        operationType: activity.operationType,
-        response: activity.response,
-        notes: activity.notes?.substring(0, 50) + "...",
-      });
-      
       const colors = getActivityColors(activity);
-      
-      console.log("📋 Activities Screen - Colors assigned:", colors);
 
       return (
         <View style={styles.activityItem}>

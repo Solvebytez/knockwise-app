@@ -354,7 +354,11 @@ function TerritoryCard({ territory, isCreatedByAgent }: TerritoryCardProps) {
   };
 
   return (
-    <View style={styles.territoryCard}>
+    <TouchableOpacity
+      style={styles.territoryCard}
+      onPress={handleMapView}
+      activeOpacity={0.7}
+    >
       <View style={styles.territoryHeader}>
         <View style={styles.territoryHeaderLeft}>
           <View
@@ -492,7 +496,10 @@ function TerritoryCard({ territory, isCreatedByAgent }: TerritoryCardProps) {
           variant="outline"
           size="small"
           title="Map View"
-          onPress={handleMapView}
+          onPress={(e) => {
+            e?.stopPropagation?.();
+            handleMapView();
+          }}
           containerStyle={styles.actionButton}
         />
         {isCreatedByAgent && (
@@ -500,17 +507,18 @@ function TerritoryCard({ territory, isCreatedByAgent }: TerritoryCardProps) {
             variant="outline"
             size="small"
             title="Edit"
-            onPress={() =>
+            onPress={(e) => {
+              e?.stopPropagation?.();
               router.push({
                 pathname: "/edit-zone/[territory_id]",
                 params: { territory_id: territory._id },
-              })
-            }
+              });
+            }}
             containerStyle={styles.actionButton}
           />
         )}
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -564,6 +572,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 1,
+    justifyContent: "center",
+    alignItems: "center",
   },
   statCard1: {
     backgroundColor: COLORS.primary[100],
@@ -575,16 +585,18 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.warning[100],
   },
   statCardHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+    flexDirection: "column",
+    justifyContent: "center",
     alignItems: "center",
     marginBottom: responsiveSpacing(SPACING.xs),
+    width: "100%",
+    gap: responsiveSpacing(SPACING.xs / 2),
   },
   statLabel: {
     fontSize: responsiveScale(12),
     color: COLORS.text.secondary,
     fontWeight: "500",
-    flex: 1,
+    textAlign: "center",
   },
   statIcon: {
     fontSize: responsiveScale(16),
@@ -594,9 +606,11 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: COLORS.text.primary,
     marginBottom: responsiveSpacing(SPACING.xs / 2),
+    textAlign: "center",
   },
   statSubtext: {
     fontSize: responsiveScale(10),
+    textAlign: "center",
   },
   searchContainer: {
     paddingHorizontal: responsiveSpacing(PADDING.screenLarge),

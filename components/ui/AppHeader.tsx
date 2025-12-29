@@ -141,9 +141,6 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   // Calculate border color based on background color
   const borderColor = getBorderColor(backgroundColor);
 
-  // Debug logging
-  console.log("🎨 Header Border:", { backgroundColor, borderColor });
-
   return (
     <View
       style={[

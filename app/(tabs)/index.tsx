@@ -55,6 +55,27 @@ export default function HomeScreen() {
     refetch: refetchStats,
   } = useAgentDashboardStats();
 
+  // Fetch manual zones count
+  const {
+    data: territoriesData,
+    isLoading: isLoadingManualZones,
+  } = useQuery({
+    queryKey: ["myTerritories"],
+    queryFn: async () => {
+      const response = await apiInstance.get("/users/my-territories");
+      return response.data;
+    },
+    refetchOnWindowFocus: false,
+  });
+
+  // Calculate manual zones count
+  const manualZonesCount = useMemo(() => {
+    const allTerritories = Array.isArray(territoriesData?.data?.territories)
+      ? territoriesData.data.territories
+      : [];
+    return allTerritories.filter((zone: any) => zone.zoneType === "MANUAL").length;
+  }, [territoriesData]);
+
   // Log error details for debugging
   if (isErrorStats && statsError) {
     console.error("❌ Dashboard stats error:", statsError);
@@ -193,8 +214,6 @@ export default function HomeScreen() {
   // Debug logging
   useEffect(() => {
     if (notVisitedResidents) {
-      console.log("📝 [HomeScreen] Not-visited residents data:", notVisitedResidents);
-      console.log("📝 [HomeScreen] Not-visited residents count:", notVisitedResidents.length);
     }
     if (isErrorNotVisited) {
       console.error("❌ [HomeScreen] Not-visited residents error:", isErrorNotVisited);
@@ -686,7 +705,11 @@ export default function HomeScreen() {
                 </View>
               </View>
 
-              <View style={[styles.statCard, styles.statCard2]}>
+              <TouchableOpacity
+                style={[styles.statCard, styles.statCard2]}
+                onPress={() => router.push("/all-properties")}
+                activeOpacity={0.7}
+              >
                 <View>
                   <View style={styles.statHeader}>
                     <MaterialIcons
@@ -716,9 +739,49 @@ export default function HomeScreen() {
                     {agentStats.totalZonesCreatedByUser || 0} zones
                   </Body2>
                 </View>
-              </View>
+              </TouchableOpacity>
 
-              <View style={[styles.statCard, styles.statCard3]}>
+              <TouchableOpacity
+                style={[styles.statCard, styles.statCard5]}
+                onPress={() => router.push("/(tabs)/manual-zone")}
+                activeOpacity={0.7}
+              >
+                <View>
+                  <View style={styles.statHeader}>
+                    <MaterialIcons
+                      name="edit-location"
+                      size={responsiveScale(20)}
+                      color={COLORS.primary[600]}
+                    />
+                    <Text
+                      variant="body2"
+                      color={COLORS.text.secondary}
+                      style={styles.statLabel}
+                    >
+                      Manual Zones
+                    </Text>
+                  </View>
+                  <Text
+                    variant="h1"
+                    color={COLORS.text.primary}
+                    weight="bold"
+                    style={styles.statValue}
+                  >
+                    {isLoadingManualZones ? "..." : manualZonesCount || 0}
+                  </Text>
+                </View>
+                <View style={styles.statFooter}>
+                  <Body2 color={COLORS.text.secondary}>
+                    {isLoadingManualZones ? "loading" : "zones"}
+                  </Body2>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.statCard, styles.statCard3]}
+                onPress={() => router.push("/(tabs)/my-territory")}
+                activeOpacity={0.7}
+              >
                 <View style={styles.statHeader}>
                   <MaterialIcons
                     name="map"
@@ -746,7 +809,7 @@ export default function HomeScreen() {
                     {agentStats.routes} routes
                   </Body2>
                 </View>
-              </View>
+              </TouchableOpacity>
 
               <View style={[styles.statCard, styles.statCard4]}>
                 <View>
@@ -1279,7 +1342,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 2,
-    justifyContent: "space-between", // Distribute content evenly
+    justifyContent: "center", // Center content vertically
+    alignItems: "center", // Center content horizontally
   },
   statCard0: {
     backgroundColor: COLORS.neutral[50],
@@ -1296,14 +1360,19 @@ const styles = StyleSheet.create({
   statCard4: {
     backgroundColor: COLORS.purple[100],
   },
+  statCard5: {
+    backgroundColor: COLORS.primary[100],
+  },
   statHeader: {
-    flexDirection: "row",
+    flexDirection: "column",
     alignItems: "center",
-    gap: responsiveSpacing(SPACING.xs),
+    gap: responsiveSpacing(SPACING.xs / 2),
     marginBottom: responsiveSpacing(SPACING.xs),
+    width: "100%",
   },
   statLabel: {
     marginBottom: 0,
+    textAlign: "center",
   },
   statValue: {
     marginBottom: responsiveSpacing(SPACING.xs),
@@ -1312,7 +1381,9 @@ const styles = StyleSheet.create({
   statFooter: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     gap: responsiveSpacing(SPACING.xs / 2),
+    width: "100%",
   },
   statFooterSpacer: {
     height: responsiveScale(20), // Match footer height for consistent spacing
@@ -1324,7 +1395,9 @@ const styles = StyleSheet.create({
   },
   performanceContent: {
     flex: 1,
-    justifyContent: "space-between",
+    justifyContent: "center",
+    alignItems: "center",
+    width: "100%",
   },
   performanceNumbers: {
     gap: responsiveSpacing(SPACING.xs / 2),
@@ -1332,15 +1405,18 @@ const styles = StyleSheet.create({
   },
   performanceRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
+    justifyContent: "center",
     alignItems: "center",
+    gap: responsiveSpacing(SPACING.xs),
   },
   performanceLabel: {
     fontSize: responsiveScale(11),
+    textAlign: "center",
   },
   performanceChange: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     gap: responsiveSpacing(SPACING.xs / 2),
     marginTop: responsiveSpacing(SPACING.xs),
   },

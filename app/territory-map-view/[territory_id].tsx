@@ -207,7 +207,6 @@ export default function TerritoryMapViewScreen() {
         const response = await apiInstance.get(
           `/residents/${selectedProperty._id}`
         );
-        console.log("✅ Property details fetched:", response.data.data);
         return response.data.data;
       },
       enabled: !!selectedProperty?._id && isDetailModalOpen,
@@ -221,12 +220,7 @@ export default function TerritoryMapViewScreen() {
       queryKey: ["propertyDetails", editPropertyId],
       queryFn: async () => {
         if (!editPropertyId) return null;
-        console.log(
-          "📡 Fetching property details for edit (cached if available):",
-          editPropertyId
-        );
         const response = await apiInstance.get(`/residents/${editPropertyId}`);
-        console.log("✅ Edit property details fetched:", response.data.data);
         return response.data.data;
       },
       enabled: !!editPropertyId && isEditModalOpen,
@@ -700,7 +694,6 @@ export default function TerritoryMapViewScreen() {
   // Update form data when editPropertyDetails loads (from React Query cache or fetch)
   useEffect(() => {
     if (editPropertyDetails && selectedProperty) {
-      console.log("📝 Updating form data with cached/fetched property details");
       // Get today's date in YYYY-MM-DD format
       const today = new Date().toISOString().split("T")[0];
       setEditFormData((prev) => ({
@@ -3314,87 +3307,20 @@ export default function TerritoryMapViewScreen() {
 
                     {/* Main Content Card */}
                     <View style={styles.propertyDetailContentCard}>
-                      {/* Check if Property Information has any data */}
-                      {(detailedProperty.resident?.houseNumber ||
-                        selectedProperty?.houseNumber ||
-                        selectedProperty?.coordinates ||
-                        detailedProperty.resident?.lastVisited ||
-                        selectedProperty?.lastVisited ||
-                        detailedProperty.resident?.notes ||
+                      {/* Notes */}
+                      {(detailedProperty.resident?.notes ||
                         selectedProperty?.notes) && (
-                        <>
-                          <Text style={styles.propertyDetailSectionTitle}>
-                            Property Information
+                        <View style={styles.propertyDetailContactRow}>
+                          <Ionicons
+                            name="document-text-outline"
+                            size={responsiveScale(20)}
+                            color={COLORS.text.secondary}
+                          />
+                          <Text style={styles.propertyDetailContactText}>
+                            {detailedProperty.resident?.notes ||
+                              selectedProperty?.notes}
                           </Text>
-
-                          {/* House Number */}
-                          {(detailedProperty.resident?.houseNumber ||
-                            selectedProperty?.houseNumber) && (
-                            <View style={styles.propertyDetailContactRow}>
-                              <Ionicons
-                                name="home-outline"
-                                size={responsiveScale(20)}
-                                color={COLORS.text.secondary}
-                              />
-                              <Text style={styles.propertyDetailContactText}>
-                                House #
-                                {detailedProperty.resident?.houseNumber ||
-                                  selectedProperty?.houseNumber}
-                              </Text>
-                            </View>
-                          )}
-
-                          {/* Coordinates */}
-                          {selectedProperty?.coordinates && (
-                            <View style={styles.propertyDetailContactRow}>
-                              <Ionicons
-                                name="location-outline"
-                                size={responsiveScale(20)}
-                                color={COLORS.text.secondary}
-                              />
-                              <Text style={styles.propertyDetailContactText}>
-                                {selectedProperty.coordinates[1].toFixed(6)},{" "}
-                                {selectedProperty.coordinates[0].toFixed(6)}
-                              </Text>
-                            </View>
-                          )}
-
-                          {/* Last Visited */}
-                          {(detailedProperty.resident?.lastVisited ||
-                            selectedProperty?.lastVisited) && (
-                            <View style={styles.propertyDetailContactRow}>
-                              <Ionicons
-                                name="calendar-outline"
-                                size={responsiveScale(20)}
-                                color={COLORS.text.secondary}
-                              />
-                              <Text style={styles.propertyDetailContactText}>
-                                Last Visited:{" "}
-                                {new Date(
-                                  detailedProperty.resident?.lastVisited ||
-                                    selectedProperty?.lastVisited ||
-                                    ""
-                                ).toLocaleDateString()}
-                              </Text>
-                            </View>
-                          )}
-
-                          {/* Notes */}
-                          {(detailedProperty.resident?.notes ||
-                            selectedProperty?.notes) && (
-                            <View style={styles.propertyDetailContactRow}>
-                              <Ionicons
-                                name="document-text-outline"
-                                size={responsiveScale(20)}
-                                color={COLORS.text.secondary}
-                              />
-                              <Text style={styles.propertyDetailContactText}>
-                                {detailedProperty.resident?.notes ||
-                                  selectedProperty?.notes}
-                              </Text>
-                            </View>
-                          )}
-                        </>
+                        </View>
                       )}
 
                       {/* Check if Contact Information has any data */}
@@ -3406,11 +3332,6 @@ export default function TerritoryMapViewScreen() {
                               styles.propertyDetailSectionTitle,
                               {
                                 marginTop:
-                                  detailedProperty.resident?.houseNumber ||
-                                  selectedProperty?.houseNumber ||
-                                  selectedProperty?.coordinates ||
-                                  detailedProperty.resident?.lastVisited ||
-                                  selectedProperty?.lastVisited ||
                                   detailedProperty.resident?.notes ||
                                   selectedProperty?.notes
                                     ? responsiveSpacing(SPACING.lg)
@@ -3469,11 +3390,6 @@ export default function TerritoryMapViewScreen() {
                               styles.propertyDetailSectionTitle,
                               {
                                 marginTop:
-                                  detailedProperty.resident?.houseNumber ||
-                                  selectedProperty?.houseNumber ||
-                                  selectedProperty?.coordinates ||
-                                  detailedProperty.resident?.lastVisited ||
-                                  selectedProperty?.lastVisited ||
                                   detailedProperty.resident?.notes ||
                                   selectedProperty?.notes ||
                                   detailedProperty.resident?.phone ||
