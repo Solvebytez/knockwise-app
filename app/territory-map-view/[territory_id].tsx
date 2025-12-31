@@ -255,6 +255,7 @@ export default function TerritoryMapViewScreen() {
   const [isEditGettingLocation, setIsEditGettingLocation] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [isEditModalScrolling, setIsEditModalScrolling] = useState(false);
+  const editModalScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Address autocomplete states
   const [addressSuggestions, setAddressSuggestions] = useState<any[]>([]);
@@ -3518,13 +3519,18 @@ export default function TerritoryMapViewScreen() {
         visible={isEditModalOpen}
         transparent={true}
         animationType="slide"
-        onRequestClose={() => {
-          // Prevent Android back button from closing modal during scroll
-          // Modal can only be closed via cross icon or cancel button
-          if (isEditModalScrolling) {
-            return;
+        presentationStyle="overFullScreen"
+        {...(Platform.OS === "android" ? {
+          onRequestClose: () => {
+            // On Android, prevent closing modal during scroll
+            // Modal can only be closed via cross icon or cancel button
+            if (isEditModalScrolling) {
+              return;
+            }
+            // Prevent Android back button from closing modal
+            // Modal should only close via explicit user action (X button or Cancel button)
           }
-        }}
+        } : {})}
       >
         <Pressable
           style={styles.propertyModalOverlay}
@@ -3632,15 +3638,37 @@ export default function TerritoryMapViewScreen() {
                   bounces={false}
                   keyboardShouldPersistTaps="handled"
                   scrollEventThrottle={16}
-                  onScrollBeginDrag={() => setIsEditModalScrolling(true)}
+                  onScrollBeginDrag={() => {
+                    setIsEditModalScrolling(true);
+                    // Clear any existing timeout
+                    if (editModalScrollTimeoutRef.current) {
+                      clearTimeout(editModalScrollTimeoutRef.current);
+                    }
+                  }}
                   onScrollEndDrag={() => {
-                    // Delay to prevent immediate dismissal after scroll
-                    setTimeout(() => setIsEditModalScrolling(false), 100);
+                    // Clear any existing timeout
+                    if (editModalScrollTimeoutRef.current) {
+                      clearTimeout(editModalScrollTimeoutRef.current);
+                    }
+                    // Delay to prevent immediate dismissal after scroll on iOS
+                    // Increased delay to prevent confirmation dialogs from appearing
+                    editModalScrollTimeoutRef.current = setTimeout(() => {
+                      setIsEditModalScrolling(false);
+                      editModalScrollTimeoutRef.current = null;
+                    }, Platform.OS === "ios" ? 500 : 100);
                   }}
                   onMomentumScrollBegin={() => setIsEditModalScrolling(true)}
                   onMomentumScrollEnd={() => {
-                    // Delay to prevent immediate dismissal after scroll
-                    setTimeout(() => setIsEditModalScrolling(false), 100);
+                    // Clear any existing timeout
+                    if (editModalScrollTimeoutRef.current) {
+                      clearTimeout(editModalScrollTimeoutRef.current);
+                    }
+                    // Delay to prevent immediate dismissal after scroll on iOS
+                    // Increased delay to prevent confirmation dialogs from appearing
+                    editModalScrollTimeoutRef.current = setTimeout(() => {
+                      setIsEditModalScrolling(false);
+                      editModalScrollTimeoutRef.current = null;
+                    }, Platform.OS === "ios" ? 500 : 100);
                   }}
                 >
                   {/* Validation Errors */}
