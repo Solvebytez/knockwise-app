@@ -58,7 +58,7 @@ export default function TabLayout() {
         name="manual-zone"
         options={{
           title: 'Manual Zone',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="pencil.fill" color={color} />,
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="square.and.pencil" color={color} />,
         }}
       />
       <Tabs.Screen

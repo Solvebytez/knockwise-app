@@ -254,6 +254,7 @@ export default function TerritoryMapViewScreen() {
   );
   const [isEditGettingLocation, setIsEditGettingLocation] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [isEditModalScrolling, setIsEditModalScrolling] = useState(false);
 
   // Address autocomplete states
   const [addressSuggestions, setAddressSuggestions] = useState<any[]>([]);
@@ -3518,8 +3519,11 @@ export default function TerritoryMapViewScreen() {
         transparent={true}
         animationType="slide"
         onRequestClose={() => {
-          // Prevent Android back button from closing modal
+          // Prevent Android back button from closing modal during scroll
           // Modal can only be closed via cross icon or cancel button
+          if (isEditModalScrolling) {
+            return;
+          }
         }}
       >
         <Pressable
@@ -3627,6 +3631,17 @@ export default function TerritoryMapViewScreen() {
                   nestedScrollEnabled={true}
                   bounces={false}
                   keyboardShouldPersistTaps="handled"
+                  scrollEventThrottle={16}
+                  onScrollBeginDrag={() => setIsEditModalScrolling(true)}
+                  onScrollEndDrag={() => {
+                    // Delay to prevent immediate dismissal after scroll
+                    setTimeout(() => setIsEditModalScrolling(false), 100);
+                  }}
+                  onMomentumScrollBegin={() => setIsEditModalScrolling(true)}
+                  onMomentumScrollEnd={() => {
+                    // Delay to prevent immediate dismissal after scroll
+                    setTimeout(() => setIsEditModalScrolling(false), 100);
+                  }}
                 >
                   {/* Validation Errors */}
                   {editValidationErrors.length > 0 && (
