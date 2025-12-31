@@ -37,7 +37,8 @@ export default function HomeScreen() {
   const router = useRouter();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [isStartKnockingModalOpen, setIsStartKnockingModalOpen] = useState(false);
+  const [isStartKnockingModalOpen, setIsStartKnockingModalOpen] =
+    useState(false);
 
   // Get today's date in YYYY-MM-DD format
   const getTodayDate = () => {
@@ -58,10 +59,7 @@ export default function HomeScreen() {
   } = useAgentDashboardStats();
 
   // Fetch manual zones count
-  const {
-    data: territoriesData,
-    isLoading: isLoadingManualZones,
-  } = useQuery({
+  const { data: territoriesData, isLoading: isLoadingManualZones } = useQuery({
     queryKey: ["myTerritories"],
     queryFn: async () => {
       const response = await apiInstance.get("/users/my-territories");
@@ -75,7 +73,8 @@ export default function HomeScreen() {
     const allTerritories = Array.isArray(territoriesData?.data?.territories)
       ? territoriesData.data.territories
       : [];
-    return allTerritories.filter((zone: any) => zone.zoneType === "MANUAL").length;
+    return allTerritories.filter((zone: any) => zone.zoneType === "MANUAL")
+      .length;
   }, [territoriesData]);
 
   // Log error details for debugging
@@ -107,16 +106,18 @@ export default function HomeScreen() {
   const performanceChange = useMemo(() => {
     const yesterday = agentStats.totalVisitsYesterday || 0;
     const today = agentStats.totalVisitsToday || 0;
-    
+
     // Check if values are equal
     if (yesterday === today) {
       return { percentage: 0, isPositive: false, isEqual: true };
     }
-    
+
     if (yesterday === 0) {
-      return today > 0 ? { percentage: 100, isPositive: true, isEqual: false } : { percentage: 0, isPositive: false, isEqual: true };
+      return today > 0
+        ? { percentage: 100, isPositive: true, isEqual: false }
+        : { percentage: 0, isPositive: false, isEqual: true };
     }
-    
+
     const change = ((today - yesterday) / yesterday) * 100;
     return {
       percentage: Math.abs(Math.round(change)),
@@ -218,7 +219,10 @@ export default function HomeScreen() {
     if (notVisitedResidents) {
     }
     if (isErrorNotVisited) {
-      console.error("❌ [HomeScreen] Not-visited residents error:", isErrorNotVisited);
+      console.error(
+        "❌ [HomeScreen] Not-visited residents error:",
+        isErrorNotVisited
+      );
     }
   }, [notVisitedResidents, isErrorNotVisited]);
 
@@ -489,7 +493,15 @@ export default function HomeScreen() {
         }
       >
         {/* Header Section */}
-        <View style={[styles.header, { paddingTop: insets.top + responsiveSpacing(SPACING.md + SPACING.xs) }]}>
+        <View
+          style={[
+            styles.header,
+            {
+              paddingTop:
+                insets.top + responsiveSpacing(SPACING.md + SPACING.xs),
+            },
+          ]}
+        >
           <View style={styles.headerLeft}>
             <Image
               source={require("@/assets/images/knockwise-logo.png")}
@@ -609,7 +621,13 @@ export default function HomeScreen() {
               style={styles.statsScrollView}
             >
               {/* Performance Card - Position 1 */}
-              <View style={[styles.statCard, styles.statCard0, styles.performanceCard]}>
+              <View
+                style={[
+                  styles.statCard,
+                  styles.statCard0,
+                  styles.performanceCard,
+                ]}
+              >
                 <View style={styles.statHeader}>
                   <MaterialIcons
                     name={
@@ -639,7 +657,10 @@ export default function HomeScreen() {
                 <View style={styles.performanceContent}>
                   <View style={styles.performanceNumbers}>
                     <View style={styles.performanceRow}>
-                      <Body2 color={COLORS.text.secondary} style={styles.performanceLabel}>
+                      <Body2
+                        color={COLORS.text.secondary}
+                        style={styles.performanceLabel}
+                      >
                         Yesterday:
                       </Body2>
                       <Body2 color={COLORS.text.primary} weight="semiBold">
@@ -647,7 +668,10 @@ export default function HomeScreen() {
                       </Body2>
                     </View>
                     <View style={styles.performanceRow}>
-                      <Body2 color={COLORS.text.secondary} style={styles.performanceLabel}>
+                      <Body2
+                        color={COLORS.text.secondary}
+                        style={styles.performanceLabel}
+                      >
                         Today:
                       </Body2>
                       <Body2 color={COLORS.text.primary} weight="semiBold">
@@ -878,10 +902,11 @@ export default function HomeScreen() {
           ) : notVisitedResidents && notVisitedResidents.length > 0 ? (
             <View style={styles.leadsContainer}>
               {notVisitedResidents.map((resident) => {
-                const zoneName = typeof resident.zoneId === 'object' 
-                  ? resident.zoneId?.name || 'Unknown Zone'
-                  : 'Unknown Zone';
-                
+                const zoneName =
+                  typeof resident.zoneId === "object"
+                    ? resident.zoneId?.name || "Unknown Zone"
+                    : "Unknown Zone";
+
                 // Status colors and display names
                 const statusColors: Record<string, string> = {
                   "not-visited": "#EF4444",
@@ -892,7 +917,7 @@ export default function HomeScreen() {
                   "follow-up": "#EC4899",
                   "not-interested": "#6B7280",
                 };
-                
+
                 const getStatusDisplayName = (status: string): string => {
                   const statusNames: Record<string, string> = {
                     "not-visited": "Not Visited",
@@ -905,19 +930,21 @@ export default function HomeScreen() {
                   };
                   return statusNames[status] || status;
                 };
-                
-                const statusColor = statusColors[resident.status] || statusColors["visited"];
+
+                const statusColor =
+                  statusColors[resident.status] || statusColors["visited"];
                 const statusDisplayName = getStatusDisplayName(resident.status);
-                
+
                 return (
-                  <TouchableOpacity 
-                    key={resident._id} 
+                  <TouchableOpacity
+                    key={resident._id}
                     style={styles.leadCard}
                     onPress={() => {
                       // Navigate to property details or zone
-                      const zoneId = typeof resident.zoneId === 'object' 
-                        ? resident.zoneId._id 
-                        : resident.zoneId;
+                      const zoneId =
+                        typeof resident.zoneId === "object"
+                          ? resident.zoneId._id
+                          : resident.zoneId;
                       router.push({
                         pathname: "/manual-zone-form",
                         params: { zoneId },
@@ -931,31 +958,58 @@ export default function HomeScreen() {
                             variant="body1"
                             weight="semiBold"
                             color={COLORS.text.primary}
-                            style={{ marginBottom: responsiveSpacing(SPACING.xs / 2) }}
+                            style={{
+                              marginBottom: responsiveSpacing(SPACING.xs / 2),
+                            }}
                           >
-                            {resident.ownerName || resident.address || 'Unknown Property'}
+                            {resident.ownerName ||
+                              resident.address ||
+                              "Unknown Property"}
                           </Text>
-                          <Body2 color={COLORS.text.secondary} numberOfLines={1}>
+                          <Body2
+                            color={COLORS.text.secondary}
+                            numberOfLines={1}
+                          >
                             {resident.address}
                           </Body2>
-                          <Body2 color={COLORS.text.secondary} style={{ fontSize: responsiveScale(11), marginTop: responsiveSpacing(SPACING.xs / 2) }}>
+                          <Body2
+                            color={COLORS.text.secondary}
+                            style={{
+                              fontSize: responsiveScale(11),
+                              marginTop: responsiveSpacing(SPACING.xs / 2),
+                            }}
+                          >
                             {zoneName}
                           </Body2>
                         </View>
-                        <View style={[styles.leadStatusBadge, { backgroundColor: `${statusColor}15` }]}>
-                          <Body2 color={statusColor} weight="medium" style={{ fontSize: responsiveScale(11) }}>
+                        <View
+                          style={[
+                            styles.leadStatusBadge,
+                            { backgroundColor: `${statusColor}15` },
+                          ]}
+                        >
+                          <Body2
+                            color={statusColor}
+                            weight="medium"
+                            style={{ fontSize: responsiveScale(11) }}
+                          >
                             {statusDisplayName}
                           </Body2>
                         </View>
                       </View>
                       {resident.phone && (
                         <View style={styles.leadMeta}>
-                          <MaterialIcons 
-                            name="phone" 
-                            size={responsiveScale(14)} 
-                            color={COLORS.text.secondary} 
+                          <MaterialIcons
+                            name="phone"
+                            size={responsiveScale(14)}
+                            color={COLORS.text.secondary}
                           />
-                          <Body2 color={COLORS.text.secondary} style={{ marginLeft: responsiveSpacing(SPACING.xs / 2) }}>
+                          <Body2
+                            color={COLORS.text.secondary}
+                            style={{
+                              marginLeft: responsiveSpacing(SPACING.xs / 2),
+                            }}
+                          >
                             {resident.phone}
                           </Body2>
                         </View>
@@ -967,9 +1021,7 @@ export default function HomeScreen() {
             </View>
           ) : (
             <View style={styles.emptyStateContainer}>
-              <Body2 color={COLORS.text.secondary}>
-                No leads available
-              </Body2>
+              <Body2 color={COLORS.text.secondary}>No leads available</Body2>
             </View>
           )}
         </View>
