@@ -10,8 +10,16 @@ export default {
     newArchEnabled: true,
     ios: {
       supportsTablet: true,
+      bundleIdentifier: "com.sahin05.knockwiseapp",
+      buildNumber: "1",
       config: {
         googleMapsApiKey: "AIzaSyCe1aICpk2SmN3ArHwp-79FnsOk38k072M",
+      },
+      infoPlist: {
+        NSLocationWhenInUseUsageDescription:
+          "This app needs access to your location to show properties on the map and help you navigate to them.",
+        NSLocationAlwaysAndWhenInUseUsageDescription:
+          "This app needs access to your location to show properties on the map and help you navigate to them.",
       },
     },
     android: {

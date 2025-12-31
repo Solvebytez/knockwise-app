@@ -141,11 +141,7 @@ export default function ManualZoneFormScreen() {
   const isEditMode = !!editZoneId;
 
   // Debug logging
-  useEffect(() => {
-    console.log("📝 [ManualZoneFormScreen] Params received:", params);
-    console.log("📝 [ManualZoneFormScreen] editZoneId:", editZoneId);
-    console.log("📝 [ManualZoneFormScreen] isEditMode:", isEditMode);
-  }, [params, editZoneId, isEditMode]);
+  useEffect(() => {}, [params, editZoneId, isEditMode]);
 
   // Fetch zone details if in edit mode
   const {
@@ -156,30 +152,13 @@ export default function ManualZoneFormScreen() {
     queryKey: ["zoneDetails", editZoneId],
     queryFn: async () => {
       if (!editZoneId) return null;
-      console.log(
-        "📝 [ManualZoneFormScreen] Fetching zone details for:",
-        editZoneId
-      );
       const response = await apiInstance.get(`/agent-zones/${editZoneId}`);
-      console.log(
-        "📝 [ManualZoneFormScreen] Zone details fetched:",
-        response.data
-      );
       return response.data;
     },
     enabled: isEditMode,
     retry: false,
     refetchOnWindowFocus: false,
   });
-
-  // Log zone fetch status
-  useEffect(() => {
-    console.log("📝 [ManualZoneFormScreen] Zone fetch status:", {
-      isLoading: isLoadingZone,
-      hasData: !!zoneDetailsData,
-      hasError: !!zoneError,
-    });
-  }, [isLoadingZone, zoneDetailsData, zoneError]);
 
   // Handle zone fetch error - redirect back to list
   useEffect(() => {
@@ -201,17 +180,6 @@ export default function ManualZoneFormScreen() {
   useEffect(() => {
     if (isEditMode && zoneDetailsData?.data) {
       const zone = zoneDetailsData.data;
-      console.log("📝 [ManualZoneFormScreen] Raw zone data:", zone);
-      console.log("📝 [ManualZoneFormScreen] Zone areaId:", zone.areaId);
-      console.log(
-        "📝 [ManualZoneFormScreen] Zone municipalityId:",
-        zone.municipalityId
-      );
-      console.log(
-        "📝 [ManualZoneFormScreen] Zone communityId:",
-        zone.communityId
-      );
-
       const mappedContext = {
         zoneId: zone._id,
         zoneName: zone.name,
@@ -226,11 +194,6 @@ export default function ManualZoneFormScreen() {
           ? { id: zone.communityId._id, name: zone.communityId.name }
           : undefined,
       };
-
-      console.log(
-        "📝 [ManualZoneFormScreen] Mapped zone context:",
-        mappedContext
-      );
       setZoneContext(mappedContext);
     }
   }, [isEditMode, zoneDetailsData]);
@@ -296,10 +259,6 @@ export default function ManualZoneFormScreen() {
       queryKey: ["propertyDetails", selectedPropertyForDetails?._id],
       queryFn: async () => {
         if (!selectedPropertyForDetails?._id) return null;
-        console.log(
-          "📡 Fetching property details (cached if available):",
-          selectedPropertyForDetails._id
-        );
         const response = await apiInstance.get(
           `/residents/${selectedPropertyForDetails._id}`
         );
@@ -590,15 +549,8 @@ export default function ManualZoneFormScreen() {
         notes: undefined, // No notes for quick add
       };
 
-      console.log("📝 [ManualZoneForm] Quick adding property:", payload);
-
       // Save property
       const response = await apiInstance.post("/residents", payload);
-
-      console.log("✅ [ManualZoneForm] Property quick-added successfully:", {
-        residentId: response.data?.data?._id,
-        zoneId: payload.zoneId,
-      });
 
       // Refresh properties list
       await refetchProperties();
@@ -700,21 +652,8 @@ export default function ManualZoneFormScreen() {
         notes: undefined, // No notes for quick add
       };
 
-      console.log(
-        "📝 [ManualZoneForm] Quick adding property from edit modal:",
-        payload
-      );
-
       // Save property
       const response = await apiInstance.post("/residents", payload);
-
-      console.log(
-        "✅ [ManualZoneForm] Property quick-added successfully from edit modal:",
-        {
-          residentId: response.data?.data?._id,
-          zoneId: payload.zoneId,
-        }
-      );
 
       // Refresh properties list and get the new property
       const newPropertyId = response.data?.data?._id;
@@ -892,17 +831,11 @@ export default function ManualZoneFormScreen() {
 
   // Handle update resident
   const handleUpdateResident = async (keepModalOpen = false) => {
-    console.log(
-      `🔵 [Save] handleUpdateResident called - keepModalOpen: ${keepModalOpen}`
-    );
-
     if (!selectedProperty) {
-      console.log("❌ [Save] No selectedProperty, returning early");
       return;
     }
 
     const propertyId = editPropertyId || selectedProperty._id;
-    console.log(`🔵 [Save] Property ID: ${propertyId}`);
 
     try {
       setIsUpdatingResident(true);
@@ -927,19 +860,12 @@ export default function ManualZoneFormScreen() {
         ownerMailingAddress: editFormData.ownerMailingAddress || undefined,
       };
 
-      console.log(`🔄 Updating resident: ${propertyId}`);
-      console.log(`🔄 Update data keys: ${Object.keys(updateData).join(", ")}`);
-
       const response = await apiInstance.put(
         `/residents/${propertyId}`,
         updateData
       );
 
-      console.log(`✅ Update response success: ${response.data?.success}`);
-
       if (response.data.success) {
-        console.log(`✅ [Save] Property update successful: ${propertyId}`);
-
         // Update selectedProperty state immediately with saved values
         // This prevents navigateToProperty from detecting changes and trying to save again
         if (selectedProperty) {
@@ -988,58 +914,23 @@ export default function ManualZoneFormScreen() {
             .sort((a, b) => a.houseNumber - b.houseNumber);
         }
 
-        console.log(
-          `🔍 [Save] Navigation check - keepModalOpen: ${keepModalOpen}`
-        );
-        console.log(`🔍 [Save] Property ID just saved: ${propertyId}`);
-        console.log(
-          `🔍 [Save] computedFilteredProperties.length: ${computedFilteredProperties.length}`
-        );
-        console.log(
-          `🔍 [Save] computedFilteredProperties IDs: ${JSON.stringify(
-            computedFilteredProperties.map((p) => p._id)
-          )}`
-        );
-
         // If not keeping modal open, check if we should auto-navigate to next property
         if (!keepModalOpen) {
-          console.log(
-            "✅ [Save] Will attempt navigation (keepModalOpen is false)"
-          );
-
           // Use the computed filteredProperties for navigation
           const updatedFilteredProperties = computedFilteredProperties;
 
           // Auto-navigate to next property if multiple properties exist
           if (updatedFilteredProperties.length > 1) {
-            console.log("✅ [Save] Conditions met for navigation");
-            console.log(
-              `🔍 [Save] updatedFilteredProperties.length: ${updatedFilteredProperties.length}`
-            );
-
             // Find current property index using the propertyId we just saved
             const currentIndex = updatedFilteredProperties.findIndex(
               (p) => p._id === propertyId
             );
-
-            console.log(`🔍 [Save] Current property index: ${currentIndex}`);
-            console.log(`🔍 [Save] Looking for property ID: ${propertyId}`);
 
             if (currentIndex !== -1) {
               // Get next property (wrap around to first if at end)
               const nextIndex =
                 (currentIndex + 1) % updatedFilteredProperties.length;
               const nextProperty = updatedFilteredProperties[nextIndex];
-
-              console.log(
-                `✅ [Save] Found next property - index: ${nextIndex}`
-              );
-              console.log(`✅ [Save] Next property ID: ${nextProperty._id}`);
-              console.log(
-                `✅ [Save] Next property address: ${
-                  nextProperty.address || "N/A"
-                }`
-              );
 
               // Navigate to next property directly (skip save check since we just saved)
               setSelectedProperty(nextProperty);
@@ -1074,28 +965,14 @@ export default function ManualZoneFormScreen() {
                 queryKey: ["propertyDetails", nextProperty._id],
               });
 
-              console.log(
-                "✅ [Save] Navigation completed - showing next property"
-              );
               // Don't show alert, just navigate silently
               return; // Keep modal open, showing next property
-            } else {
-              console.log(
-                "❌ [Save] Current property not found in filteredProperties list"
-              );
             }
-          } else {
-            console.log(
-              `❌ [Save] Navigation skipped - only ${updatedFilteredProperties.length} property(ies)`
-            );
           }
 
           // If only 1 property or navigation failed, show success and close modal
-          console.log("⚠️ [Save] Showing success alert and closing modal");
           Alert.alert("Success", "Property updated successfully!");
           handleCloseEditModal();
-        } else {
-          console.log("ℹ️ [Save] Navigation skipped - keepModalOpen is true");
         }
       }
     } catch (error: any) {
@@ -1544,18 +1421,6 @@ export default function ManualZoneFormScreen() {
             ...zoneContext,
             zoneId,
           };
-          console.log(
-            "📝 [ManualZoneFormScreen] Passing to modal - zoneContext:",
-            zoneContext
-          );
-          console.log(
-            "📝 [ManualZoneFormScreen] Passing to modal - editZoneId:",
-            editZoneId
-          );
-          console.log(
-            "📝 [ManualZoneFormScreen] Passing to modal - initialValue:",
-            value
-          );
           return value;
         })()}
         onSave={handleZoneSaved}
