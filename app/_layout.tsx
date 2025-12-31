@@ -7,6 +7,7 @@ import { Stack, useRouter, useSegments } from "expo-router";
 import { useEffect } from "react";
 import "react-native-reanimated";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useAuthStore } from "@/store/authStore";
@@ -53,37 +54,39 @@ export default function RootLayout() {
   useProtectedRoute();
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <QueryProvider>
-        <GlobalStatusBar />
-        <ThemeProvider
-          value={colorScheme === "dark" ? DarkTheme : DefaultTheme}
-        >
-          <Stack
-            screenOptions={{
-              headerShown: false,
-            }}
+    <SafeAreaProvider>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <QueryProvider>
+          <GlobalStatusBar />
+          <ThemeProvider
+            value={colorScheme === "dark" ? DarkTheme : DefaultTheme}
           >
-            <Stack.Screen name="index" />
-            <Stack.Screen name="login" />
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen
-              name="territory-map-view/[territory_id]"
-              options={{
+            <Stack
+              screenOptions={{
                 headerShown: false,
               }}
-            />
-            <Stack.Screen
-              name="modal"
-              options={{
-                presentation: "modal",
-                headerShown: true,
-                title: "Modal",
-              }}
-            />
-          </Stack>
-        </ThemeProvider>
-      </QueryProvider>
-    </GestureHandlerRootView>
+            >
+              <Stack.Screen name="index" />
+              <Stack.Screen name="login" />
+              <Stack.Screen name="(tabs)" />
+              <Stack.Screen
+                name="territory-map-view/[territory_id]"
+                options={{
+                  headerShown: false,
+                }}
+              />
+              <Stack.Screen
+                name="modal"
+                options={{
+                  presentation: "modal",
+                  headerShown: true,
+                  title: "Modal",
+                }}
+              />
+            </Stack>
+          </ThemeProvider>
+        </QueryProvider>
+      </GestureHandlerRootView>
+    </SafeAreaProvider>
   );
 }

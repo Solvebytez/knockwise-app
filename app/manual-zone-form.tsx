@@ -1129,10 +1129,6 @@ export default function ManualZoneFormScreen() {
         title={isEditMode ? "Edit Manual Zone" : "Manual Zone"}
         showBackButton={true}
         backgroundColor={COLORS.primary[500]}
-        style={{
-          paddingTop: insets.top + responsiveSpacing(SPACING.sm),
-          paddingBottom: responsiveSpacing(PADDING.sm),
-        }}
         navigationStyle={{
           paddingHorizontal: responsiveSpacing(PADDING.md),
         }}

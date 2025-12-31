@@ -12,6 +12,7 @@ import { Image } from "expo-image";
 import { StatusBar } from "expo-status-bar";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuthStore } from "@/store/authStore";
 import { getMyRoutes } from "@/lib/routeApi";
 import { useMyActivities, Activity } from "@/lib/activityApi";
@@ -31,6 +32,7 @@ import { SideDrawer } from "@/components/ui/SideDrawer";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 
 export default function HomeScreen() {
+  const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   const router = useRouter();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -487,7 +489,7 @@ export default function HomeScreen() {
         }
       >
         {/* Header Section */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: insets.top + responsiveSpacing(SPACING.md + SPACING.xs) }]}>
           <View style={styles.headerLeft}>
             <Image
               source={require("@/assets/images/knockwise-logo.png")}
@@ -1191,7 +1193,6 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: responsiveSpacing(PADDING.screenLarge),
-    paddingTop: responsiveSpacing(SPACING.md + SPACING.xs),
     paddingBottom: responsiveSpacing(SPACING.sm),
     backgroundColor: COLORS.white,
   },
