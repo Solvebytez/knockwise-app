@@ -257,7 +257,11 @@ export default function AllPropertiesScreen() {
   };
 
   const handleBack = () => {
-    router.back();
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace("/(tabs)");
   };
 
   const loadMore = () => {

@@ -98,7 +98,11 @@ function ManualZoneScreen() {
   };
 
   const handleBack = () => {
-    router.back();
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace("/(tabs)");
   };
 
   // Filter to only manual zones and sort by latest first
@@ -273,7 +277,14 @@ function ManualZoneScreen() {
         <View style={styles.statsContainer}>
           <View style={[styles.statCard, styles.statCard1]}>
             <View style={styles.statCardHeader}>
-              <Text style={styles.statLabel}>Manual Zones</Text>
+              <Text
+                style={styles.statLabel}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.8}
+              >
+                Manual Zones
+              </Text>
               <Text style={styles.statIcon}>📝</Text>
             </View>
             <Text style={styles.statValue}>{summary.totalZones}</Text>
@@ -286,7 +297,14 @@ function ManualZoneScreen() {
 
           <View style={[styles.statCard, styles.statCard2]}>
             <View style={styles.statCardHeader}>
-              <Text style={styles.statLabel}>Total Houses</Text>
+              <Text
+                style={styles.statLabel}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.8}
+              >
+                Total Houses
+              </Text>
               <Text style={styles.statIcon}>🏠</Text>
             </View>
             <Text style={styles.statValue}>{summary.totalHouses}</Text>
@@ -297,7 +315,14 @@ function ManualZoneScreen() {
 
           <View style={[styles.statCard, styles.statCard3]}>
             <View style={styles.statCardHeader}>
-              <Text style={styles.statLabel}>Progress</Text>
+              <Text
+                style={styles.statLabel}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.8}
+              >
+                Progress
+              </Text>
               <Text style={styles.statIcon}>🎯</Text>
             </View>
             <Text style={styles.statValue}>

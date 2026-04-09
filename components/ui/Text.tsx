@@ -80,10 +80,16 @@ export const Text: React.FC<CustomTextProps> = ({
     lineHeight ||
     LINE_HEIGHT[variant as keyof typeof LINE_HEIGHT] ||
     fontSize * 1.5;
-  const calculatedLineHeight = responsiveValue(
+  const responsiveLineHeight = responsiveValue(
     baseLineHeight,
     baseLineHeight * 1.1, // Slightly larger for tablets
     baseLineHeight * 1.05 // Slightly larger for large phones
+  );
+  // Prevent text clipping on larger screens by ensuring line-height
+  // remains proportional to the final responsive font size.
+  const minimumLineHeight = fontSize * 1.2;
+  const calculatedLineHeight = Math.ceil(
+    Math.max(responsiveLineHeight, minimumLineHeight)
   );
 
   // Get font weight
