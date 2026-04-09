@@ -97,6 +97,10 @@ function ManualZoneScreen() {
     await refetch();
   };
 
+  const handleBack = () => {
+    router.back();
+  };
+
   // Filter to only manual zones and sort by latest first
   const allTerritories = Array.isArray(territoriesData?.data?.territories)
     ? territoriesData.data.territories
@@ -246,7 +250,8 @@ function ManualZoneScreen() {
       <AppHeader
         title="Manual Zone"
         subtext={`Manage your manual zones (${manualZones.length} total)`}
-        showBackButton={false}
+        showBackButton={true}
+        onBackPress={handleBack}
         backgroundColor={COLORS.primary[500]}
         textColor={COLORS.white}
         density="compact"

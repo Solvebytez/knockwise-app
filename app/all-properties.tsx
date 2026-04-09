@@ -256,6 +256,10 @@ export default function AllPropertiesScreen() {
     Linking.openURL(`tel:${phone}`);
   };
 
+  const handleBack = () => {
+    router.back();
+  };
+
   const loadMore = () => {
     if (page < pagination.pages && !isLoading) {
       setPage((prev) => prev + 1);
@@ -273,6 +277,7 @@ export default function AllPropertiesScreen() {
           title="All Properties"
           subtext="View all your properties"
           showBackButton={true}
+          onBackPress={handleBack}
           backgroundColor={COLORS.primary[500]}
           textColor={COLORS.white}
           density="compact"
@@ -300,6 +305,7 @@ export default function AllPropertiesScreen() {
         title="All Properties"
         subtext={`View all your properties (${pagination.total || 0} total)`}
         showBackButton={true}
+        onBackPress={handleBack}
         backgroundColor={COLORS.primary[500]}
         textColor={COLORS.white}
         density="compact"
